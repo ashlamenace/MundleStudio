@@ -1,0 +1,33 @@
+================================================
+CRYSTAL GUARDIAN - HOST PUBLIC TEMPORAIRE
+================================================
+Serveur local : http://127.0.0.1:3000
+WebSocket     : ws://127.0.0.1:3000/ws
+Tunnel        : C:\Users\clemg\AppData\Local\Microsoft\WinGet\Links\cloudflared.exe
+
+Tunnel Cloudflare en cours de creation...
+[server] [BOOT] WebSocket path configured on /ws
+[server] node:events:496
+[server]       throw er; // Unhandled 'error' event
+[server]       ^
+[server] Error: listen EADDRINUSE: address already in use :::3000
+[server]     at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+[server]     at listenInCluster (node:net:1997:12)
+[server]     at Server.listen (node:net:2102:7)
+[server]     at Object.<anonymous> (C:\Users\clemg\Documents\web game\server.js:72:12)
+[server]     at Module._compile (node:internal/modules/cjs/loader:1730:14)
+[server]     at Object..js (node:internal/modules/cjs/loader:1895:10)
+[server]     at Module.load (node:internal/modules/cjs/loader:1465:32)
+[server]     at Function._load (node:internal/modules/cjs/loader:1282:12)
+[server]     at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+[server]     at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+[server] Emitted 'error' event on Server instance at:
+[server]     at emitErrorNT (node:net:1976:8)
+[server]     at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+[server]   code: 'EADDRINUSE',
+[server]   errno: -4091,
+[server]   syscall: 'listen',
+[server]   address: '::',
+[server]   port: 3000
+[server] }
+[server] Node.js v22.17.0

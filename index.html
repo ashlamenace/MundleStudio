@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crystal Guardian - Survival Game</title>
+    <meta name="description"
+        content="Protégez votre cristal contre les vagues de monstres nocturnes dans ce jeu de survie 2D">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+
+        <!-- Notification Banner -->
+        <div id="notification-banner" class="hidden" style="
+            position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); border: 1px solid #444;
+            padding: 8px 20px; border-radius: 8px;
+            font-family: Rajdhani, sans-serif; font-size: 16px; font-weight: bold;
+            z-index: 200; pointer-events: none; text-align: center;
+        "></div>
+
+        <!-- HUD Overlay -->
+        <div id="hud">
+            <!-- Top Left: Health Bars -->
+            <div id="health-section">
+                <div class="health-bar" id="player-health">
+                    <span class="health-icon">♥</span>
+                    <div class="bar-container">
+                        <div class="bar-fill" id="player-health-fill"></div>
+                        <span class="bar-text" id="player-health-text">100/100</span>
+                    </div>
+                </div>
+                <div class="health-bar" id="crystal-health">
+                    <span class="health-icon crystal">💎</span>
+                    <div class="bar-container crystal">
+                        <div class="bar-fill crystal" id="crystal-health-fill"></div>
+                        <span class="bar-text" id="crystal-health-text">500/500</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top Right: Resources -->
+            <div id="resources-section">
+                <div class="resource" id="wood-resource">
+                    <span class="resource-icon wood">🪵</span>
+                    <span class="resource-count" id="wood-count">0</span>
+                </div>
+                <div class="resource" id="stone-resource">
+                    <span class="resource-icon stone">🪨</span>
+                    <span class="resource-count" id="stone-count">0</span>
+                </div>
+                <div class="resource" id="metal-resource">
+                    <span class="resource-icon metal">⚙️</span>
+                    <span class="resource-count" id="metal-count">0</span>
+                </div>
+                <div class="resource" id="amethyst-resource">
+                    <span class="resource-icon amethyst">💜</span>
+                    <span class="resource-count" id="amethyst-count">0</span>
+                </div>
+            </div>
+
+            <!-- Top Center: Wave Timer -->
+            <div id="wave-section">
+                <div id="wave-indicator" class="day">
+                    <span id="wave-icon">☀️</span>
+                    <span id="wave-text">DAY 1</span>
+                    <span id="wave-timer">2:00</span>
+                    <span id="turret-counter" title="Tourelles posées / maximum">🏰 0/0</span>
+                </div>
+                <div id="wave-warning" class="hidden">
+                    ⚠️ NIGHT APPROACHING
+                </div>
+                <button id="skip-to-night-btn" class="hidden" type="button">
+                    ⏭️ Passer à la nuit
+                </button>
+            </div>
+
+            <!-- Bottom: Action Bar -->
+            <div id="action-bar">
+                <div class="action-slot selected" data-slot="1" id="slot-1">
+                    <span class="slot-key">1</span>
+                    <span class="slot-icon">⚔️</span>
+                    <span class="slot-name">Sword</span>
+                </div>
+                <div class="action-slot" data-slot="2" id="slot-2">
+                    <span class="slot-key">2</span>
+                    <span class="slot-icon">🪓</span>
+                    <span class="slot-name">Axe</span>
+                </div>
+                <div class="action-slot" data-slot="3" id="slot-3">
+                    <span class="slot-key">3</span>
+                    <span class="slot-icon">⛏️</span>
+                    <span class="slot-name">Pickaxe</span>
+                </div>
+                <div class="action-slot" data-slot="4" id="slot-4">
+                    <span class="slot-key">4</span>
+                    <span class="slot-icon">🏹</span>
+                    <span class="slot-name">Bow</span>
+                </div>
+                <div class="action-slot" data-slot="5" id="slot-5">
+                    <span class="slot-key">5</span>
+                    <span class="slot-icon">🏗️</span>
+                    <span class="slot-name">Build</span>
+                </div>
+            </div>
+
+            <!-- Bottom Right: Minimap -->
+            <div id="minimap-container">
+                <canvas id="minimap-canvas"></canvas>
+                <div id="minimap-label">MAP</div>
+            </div>
+        </div>
+
+        <!-- Build Menu (hidden by default) -->
+        <div id="build-menu" class="hidden">
+            <div class="build-menu-header">
+                <h2>🏗️ Construction</h2>
+                <button id="close-build-menu">✕</button>
+            </div>
+            <div class="build-categories">
+                <button class="build-category active" data-category="defense">Défense</button>
+                <button class="build-category" data-category="production">Production</button>
+                <button class="build-category" data-category="utility">Utilitaire</button>
+            </div>
+            <div class="build-items" id="build-items">
+                <!-- Items populated by JS -->
+            </div>
+        </div>
+
+        <!-- Level Up Modal -->
+        <div id="level-up-modal" class="hidden">
+            <div class="level-up-content">
+                <h2>🎉 NIVEAU <span id="new-level">2</span></h2>
+                <p>Choisissez une amélioration:</p>
+                <div class="stat-choices">
+                    <button class="stat-choice" data-stat="mobility">
+                        <span class="stat-icon">🏃</span>
+                        <span class="stat-name">Mobilité</span>
+                        <span class="stat-desc">+5% vitesse</span>
+                    </button>
+                    <button class="stat-choice" data-stat="damage">
+                        <span class="stat-icon">⚔️</span>
+                        <span class="stat-name">Dégâts</span>
+                        <span class="stat-desc">+8% dégâts</span>
+                    </button>
+                    <button class="stat-choice" data-stat="farming">
+                        <span class="stat-icon">⛏️</span>
+                        <span class="stat-name">Récolte</span>
+                        <span class="stat-desc">+12% vitesse farm</span>
+                    </button>
+                    <button class="stat-choice" data-stat="xpGain">
+                        <span class="stat-icon">⭐</span>
+                        <span class="stat-name">XP Bonus</span>
+                        <span class="stat-desc">+15% gain XP</span>
+                    </button>
+                    <button class="stat-choice" data-stat="regen">
+                        <span class="stat-icon">💚</span>
+                        <span class="stat-name">Régénération</span>
+                        <span class="stat-desc">+2 PV/sec passif</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Workbench Modal -->
+        <div id="workbench-modal" class="hidden">
+            <div class="workbench-content">
+                <div class="workbench-header">
+                    <h2>🔨 Établi - Améliorer Outils</h2>
+                    <button id="close-workbench">✕</button>
+                </div>
+                <div class="tool-upgrades">
+                    <div class="tool-upgrade" data-tool="axe">
+                        <span class="tool-icon">🪓</span>
+                        <div class="tool-info">
+                            <span class="tool-name">Hache</span>
+                            <span class="tool-tier" id="axe-tier">Niveau 1</span>
+                        </div>
+                        <div class="tool-cost" id="axe-cost">20 Bois + 10 Pierre</div>
+                        <button class="upgrade-btn" id="upgrade-axe">Améliorer</button>
+                    </div>
+                    <div class="tool-upgrade" data-tool="pickaxe">
+                        <span class="tool-icon">⛏️</span>
+                        <div class="tool-info">
+                            <span class="tool-name">Pioche</span>
+                            <span class="tool-tier" id="pickaxe-tier">Niveau 1</span>
+                        </div>
+                        <div class="tool-cost" id="pickaxe-cost">20 Pierre + 10 Métal</div>
+                        <button class="upgrade-btn" id="upgrade-pickaxe">Améliorer</button>
+                    </div>
+                    <div class="tool-upgrade" data-tool="sword">
+                        <span class="tool-icon">⚔️</span>
+                        <div class="tool-info">
+                            <span class="tool-name">Épée</span>
+                            <span class="tool-tier" id="sword-tier">Tier 1</span>
+                            <span class="tool-stats" id="sword-stats">Dmg: 15 | Portée: 50 | Vitesse: 0.3s</span>
+                        </div>
+                        <div class="tool-cost" id="sword-cost">25 Pierre + 15 Métal</div>
+                        <button class="upgrade-btn" id="upgrade-sword">Améliorer</button>
+                    </div>
+                    <div class="tool-upgrade" data-tool="bow">
+                        <span class="tool-icon">🏹</span>
+                        <div class="tool-info">
+                            <span class="tool-name">Arc</span>
+                            <span class="tool-tier" id="bow-tier">Tier 1</span>
+                            <span class="tool-stats" id="bow-stats">Dmg: 10 | Portée: 300 | Vitesse: 0.6s</span>
+                        </div>
+                        <div class="tool-cost" id="bow-cost">30 Bois + 20 Pierre</div>
+                        <button class="upgrade-btn" id="upgrade-bow">Améliorer</button>
+                    </div>
+
+                </div>
+                <p class="tool-hint">Améliorer vos outils pour récolter plus vite et accéder à de meilleures ressources!
+                </p>
+            </div>
+        </div>
+
+        <!-- Building Upgrade Modal -->
+        <div id="building-upgrade-modal" class="hidden">
+            <div class="building-upgrade-content">
+                <div class="building-upgrade-header">
+                    <h2 id="building-upgrade-title">Amélioration Bâtiment</h2>
+                    <button id="close-building-upgrade">✕</button>
+                </div>
+
+                <div class="building-upgrade-body">
+                    <div id="building-upgrade-level" class="building-upgrade-level"></div>
+
+                    <div class="building-upgrade-section">
+                        <h3>Effets de l'amélioration</h3>
+                        <ul id="building-upgrade-effects" class="building-upgrade-effects"></ul>
+                    </div>
+
+                    <div class="building-upgrade-section">
+                        <h3>Coût</h3>
+                        <div id="building-upgrade-cost" class="building-upgrade-cost"></div>
+                    </div>
+                </div>
+
+                <div class="building-upgrade-actions">
+                    <button id="confirm-building-upgrade" class="upgrade-btn">Confirmer</button>
+                    <button id="cancel-building-upgrade" class="secondary-btn">Annuler</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bow Effect Choice Modal -->
+        <div id="bow-effect-modal" class="hidden">
+            <div class="modal-content">
+                <h2>⭐ Choisissez un Effet Spécial</h2>
+                <p>Votre arc est maintenant enchanté ! Choisissez un effet élémentaire :</p>
+                <div class="effect-choices">
+                    <button class="effect-btn" data-effect="fire">
+                        <span class="effect-icon">🔥</span>
+                        <span class="effect-name">Feu</span>
+                        <span class="effect-desc">Brûle les ennemis (5 DPS, 3s)</span>
+                    </button>
+                    <button class="effect-btn" data-effect="lightning">
+                        <span class="effect-icon">⚡</span>
+                        <span class="effect-name">Foudre</span>
+                        <span class="effect-desc">Chaîne vers 2 ennemis (50% dégâts)</span>
+                    </button>
+                    <button class="effect-btn" data-effect="ice">
+                        <span class="effect-icon">❄️</span>
+                        <span class="effect-name">Glace</span>
+                        <span class="effect-desc">Ralentit les ennemis (40%, 2s)</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dev Mode Panel -->
+        <div id="dev-panel" class="hidden">
+            <div class="dev-panel-header">
+                <h3>🛠️ Mode Développeur</h3>
+                <button id="close-dev-panel">✕</button>
+            </div>
+            <div class="dev-section">
+                <h4>📦 Ressources (+100)</h4>
+                <div class="dev-buttons">
+                    <button class="dev-btn" data-action="add-wood">🪵 Bois</button>
+                    <button class="dev-btn" data-action="add-stone">🪨 Pierre</button>
+                    <button class="dev-btn" data-action="add-metal">⚙️ Métal</button>
+                    <button class="dev-btn" data-action="add-amethyst">💜 Améthyste</button>
+                    <button class="dev-btn" data-action="add-all">🎁 Tout +1000</button>
+                    <button class="dev-btn" data-action="upgrade-crystal">✨ Upgrade Cristal</button>
+                </div>
+            </div>
+            <div class="dev-section">
+                <h4>👹 Spawner Ennemis</h4>
+                <div class="dev-buttons mob-buttons">
+                    <button class="dev-btn" data-spawn="grunt">Grunt</button>
+                    <button class="dev-btn" data-spawn="speeder">Speeder</button>
+                    <button class="dev-btn" data-spawn="tank">Tank</button>
+                    <button class="dev-btn" data-spawn="bomber">Bomber</button>
+                    <button class="dev-btn" data-spawn="scorpion">Scorpion</button>
+                    <button class="dev-btn" data-spawn="mummy">Mummy</button>
+                    <button class="dev-btn" data-spawn="frostElemental">Frost Elemental</button>
+                    <button class="dev-btn" data-spawn="iceWolf">Ice Wolf</button>
+                    <button class="dev-btn" data-spawn="swampThing">Swamp Thing</button>
+                    <button class="dev-btn" data-spawn="poisonFrog">Poison Frog</button>
+                    <button class="dev-btn" data-spawn="fireImp">Fire Imp</button>
+                    <button class="dev-btn" data-spawn="lavaGolem">Lava Golem</button>
+                    <button class="dev-btn" data-spawn="mimic">Mimic</button>
+                    <button class="dev-btn" data-spawn="shadow">Shadow</button>
+                    <button class="dev-btn" data-spawn="wanderer">Wanderer</button>
+                </div>
+            </div>
+            <div class="dev-section">
+                <h4>⭐ XP & Niveau</h4>
+                <div class="dev-buttons">
+                    <button class="dev-btn" data-action="add-xp-100">+100 XP</button>
+                    <button class="dev-btn" data-action="add-xp-1000">+1000 XP</button>
+                    <button class="dev-btn" data-action="level-up">↑ Level Up</button>
+                </div>
+            </div>
+            <div class="dev-section">
+                <h4>🔧 Outils</h4>
+                <div class="dev-buttons">
+                    <button class="dev-btn" data-action="upgrade-axe">⬆️ Hache</button>
+                    <button class="dev-btn" data-action="upgrade-pickaxe">⬆️ Pioche</button>
+                    <button class="dev-btn" data-action="max-tools">🔝 Max Outils</button>
+                </div>
+            </div>
+            <div class="dev-section">
+                <h4>🎮 Divers</h4>
+                <div class="dev-buttons">
+                    <button class="dev-btn" data-action="heal">❤️ Full Heal</button>
+                    <button class="dev-btn" data-action="kill-all">💀 Kill All</button>
+                    <button class="dev-btn" data-action="skip-wave">⏭️ Skip Wave</button>
+                    <button class="dev-btn" data-action="god-mode" id="god-mode-btn">🛡️ God Mode</button>
+                </div>
+            </div>
+            <div class="dev-section">
+                <h4>⏱️ Vitesse du Temps</h4>
+                <div class="dev-buttons">
+                    <button class="dev-btn time-speed-btn active" data-speed="1">1x Normal</button>
+                    <button class="dev-btn time-speed-btn" data-speed="2">2x Rapide</button>
+                    <button class="dev-btn time-speed-btn" data-speed="5">5x Très Rapide</button>
+                    <button class="dev-btn time-speed-btn" data-speed="10">10x Ultra Rapide</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dev Panel Toggle Button -->
+        <button id="dev-toggle" class="hidden">🛠️ DEV</button>
+
+        <!-- Game Over Screen -->
+        <div id="game-over-screen" class="hidden">
+            <div class="game-over-content">
+                <h1>GAME OVER</h1>
+                <p id="survival-time">Vous avez survécu 0 jours</p>
+                <div id="prestige-info">
+                    <p>Prestige bonus: <span id="prestige-bonus">0%</span></p>
+                    <p>Ressources conservées au prochain run</p>
+                </div>
+                <button id="restart-button">🔄 Recommencer</button>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- LOBBY SCREEN                                           -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <div id="lobby-screen">
+            <style>
+                #lobby-screen {
+                    position: fixed; inset: 0;
+                    display: flex; align-items: center; justify-content: center;
+                    overflow: auto;
+                    padding: 32px 20px;
+                    background:
+                        radial-gradient(circle at top, rgba(56, 189, 248, .14), transparent 34%),
+                        radial-gradient(circle at 15% 20%, rgba(168, 85, 247, .18), transparent 26%),
+                        linear-gradient(160deg, #08111f 0%, #0d1328 45%, #140d24 100%);
+                    z-index: 500; font-family: 'Rajdhani', sans-serif;
+                }
+                #lobby-screen::before,
+                #lobby-screen::after {
+                    content: '';
+                    position: fixed;
+                    inset: auto;
+                    pointer-events: none;
+                    filter: blur(18px);
+                    opacity: .65;
+                }
+                #lobby-screen::before {
+                    width: 320px;
+                    height: 320px;
+                    top: 72px;
+                    right: 8vw;
+                    border-radius: 50%;
+                    background: radial-gradient(circle, rgba(34, 211, 238, .22), transparent 70%);
+                }
+                #lobby-screen::after {
+                    width: 380px;
+                    height: 380px;
+                    bottom: 42px;
+                    left: 6vw;
+                    border-radius: 50%;
+                    background: radial-gradient(circle, rgba(168, 85, 247, .2), transparent 72%);
+                }
+                #lobby-screen.hidden { display: none; }
+                .lobby-wrap {
+                    width: 100%;
+                    max-width: 1040px;
+                    padding: 28px;
+                    box-sizing: border-box;
+                    border: 1px solid rgba(148, 163, 184, .16);
+                    border-radius: 28px;
+                    background: linear-gradient(180deg, rgba(9, 15, 32, .9), rgba(12, 18, 39, .8));
+                    box-shadow: 0 30px 90px rgba(0, 0, 0, .42);
+                    backdrop-filter: blur(18px);
+                    position: relative;
+                    animation: lobby-rise .45s ease-out;
+                }
+                .lobby-wrap::before {
+                    content: '';
+                    position: absolute;
+                    inset: 1px;
+                    border-radius: 27px;
+                    border: 1px solid rgba(255, 255, 255, .04);
+                    pointer-events: none;
+                }
+                .lobby-hero {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 12px;
+                    margin-bottom: 28px;
+                    text-align: center;
+                }
+                .lobby-kicker {
+                    margin: 0;
+                    padding: 6px 14px;
+                    border: 1px solid rgba(125, 211, 252, .24);
+                    border-radius: 999px;
+                    background: rgba(15, 23, 42, .55);
+                    color: #7dd3fc;
+                    font-size: .9rem;
+                    letter-spacing: .14em;
+                    text-transform: uppercase;
+                }
+                .lobby-title {
+                    margin: 0;
+                    font-family: 'Orbitron', sans-serif;
+                    font-size: clamp(2.3rem, 5vw, 3.8rem);
+                    font-weight: 900;
+                    line-height: .95;
+                    color: #f8fbff;
+                    text-shadow: 0 0 34px rgba(56, 189, 248, .22);
+                }
+                .lobby-title span {
+                    display: block;
+                    color: #c084fc;
+                }
+                .lobby-subtitle {
+                    max-width: 620px;
+                    margin: 0;
+                    color: rgba(226, 232, 240, .74);
+                    font-size: 1.05rem;
+                    line-height: 1.5;
+                }
+
+                .lobby-server-row {
+                    display: grid;
+                    grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+                    gap: 16px;
+                    align-items: center;
+                    margin-bottom: 24px;
+                    padding: 16px 18px;
+                    border: 1px solid rgba(125, 211, 252, .14);
+                    border-radius: 18px;
+                    background: linear-gradient(135deg, rgba(15, 23, 42, .72), rgba(30, 41, 59, .38));
+                }
+                .lobby-server-copy {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 4px;
+                }
+                .lobby-server-row label {
+                    color: #cbd5e1;
+                    font-size: .92rem;
+                    font-weight: 700;
+                    letter-spacing: .08em;
+                    text-transform: uppercase;
+                }
+                .lobby-server-hint {
+                    color: rgba(148, 163, 184, .75);
+                    font-size: .85rem;
+                    line-height: 1.4;
+                }
+                #lobby-server-url {
+                    width: 100%;
+                    min-width: 0;
+                    padding: 14px 16px;
+                    border: 1px solid rgba(148, 163, 184, .24);
+                    border-radius: 14px;
+                    outline: none;
+                    background: rgba(2, 6, 23, .42);
+                    color: #e0f2fe;
+                    font-family: 'Rajdhani', sans-serif;
+                    font-size: 1.02rem;
+                    transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+                }
+                #lobby-server-url:focus {
+                    border-color: rgba(125, 211, 252, .72);
+                    box-shadow: 0 0 0 4px rgba(56, 189, 248, .12);
+                    transform: translateY(-1px);
+                }
+
+                .lobby-panels {
+                    display: grid;
+                    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+                    gap: 18px;
+                    align-items: stretch;
+                }
+                .lobby-panel {
+                    position: relative;
+                    overflow: hidden;
+                    background: linear-gradient(180deg, rgba(15, 23, 42, .9), rgba(15, 23, 42, .66));
+                    border: 1px solid rgba(148, 163, 184, .16);
+                    border-radius: 22px;
+                    padding: 24px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 14px;
+                    min-height: 100%;
+                    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+                    transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+                }
+                .lobby-panel::before {
+                    content: '';
+                    position: absolute;
+                    inset: 0;
+                    background: linear-gradient(180deg, rgba(255, 255, 255, .05), transparent 24%);
+                    pointer-events: none;
+                }
+                .lobby-panel:hover {
+                    transform: translateY(-2px);
+                    border-color: rgba(192, 132, 252, .34);
+                    box-shadow: 0 20px 40px rgba(2, 6, 23, .24);
+                }
+                .lobby-panel h2 {
+                    font-family: 'Orbitron', sans-serif;
+                    font-size: 1rem;
+                    color: #e9d5ff;
+                    margin: 0;
+                    letter-spacing: .14em;
+                }
+                .lobby-panel-copy {
+                    margin: -4px 0 4px;
+                    color: rgba(148, 163, 184, .82);
+                    font-size: .95rem;
+                    line-height: 1.45;
+                }
+                .lobby-divider {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    align-self: stretch;
+                    color: rgba(148, 163, 184, .7);
+                    font-weight: 700;
+                    letter-spacing: .28em;
+                    text-transform: uppercase;
+                }
+                .lobby-divider::before,
+                .lobby-divider::after {
+                    content: '';
+                    width: 1px;
+                    height: 84px;
+                    background: linear-gradient(180deg, transparent, rgba(125, 211, 252, .28), transparent);
+                }
+                .lobby-divider::before { margin-right: 14px; }
+                .lobby-divider::after { margin-left: 14px; }
+
+                .lobby-btn {
+                    padding: 12px 20px; border: none; border-radius: 12px; cursor: pointer;
+                    font-family: 'Rajdhani', sans-serif; font-weight: 700; font-size: 1rem;
+                    letter-spacing: .04em;
+                    transition: transform .18s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease; }
+                .lobby-btn:hover { transform: translateY(-1px); }
+                .lobby-btn:disabled {
+                    opacity: .6;
+                    cursor: not-allowed;
+                    transform: none;
+                    box-shadow: none;
+                }
+                .lobby-btn-primary {
+                    background: linear-gradient(135deg, #7c3aed, #a855f7 58%, #c084fc);
+                    color: #fff;
+                    box-shadow: 0 16px 34px rgba(124, 58, 237, .28);
+                }
+                .lobby-btn-primary:hover { box-shadow: 0 22px 38px rgba(124, 58, 237, .34); }
+                .lobby-btn-secondary {
+                    background: linear-gradient(135deg, rgba(14, 116, 144, .95), rgba(29, 78, 216, .95));
+                    color: #e0f2fe;
+                    border: 1px solid rgba(125, 211, 252, .2);
+                    box-shadow: 0 16px 34px rgba(14, 116, 144, .2);
+                }
+                .lobby-btn-secondary:hover { box-shadow: 0 22px 38px rgba(14, 116, 144, .28); }
+
+                #lobby-host-area,
+                #lobby-client-area {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 14px;
+                }
+                #lobby-host-area.hidden,
+                #lobby-client-area.hidden {
+                    display: none;
+                }
+
+                #lobby-code-display {
+                    background: linear-gradient(135deg, rgba(168, 85, 247, .16), rgba(59, 130, 246, .14));
+                    border: 1px solid rgba(192, 132, 252, .4);
+                    border-radius: 16px;
+                    padding: 14px 16px;
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                }
+                #lobby-code-value {
+                    font-family: 'Orbitron', sans-serif;
+                    font-size: clamp(1.35rem, 3vw, 1.7rem);
+                    letter-spacing: .24em;
+                    color: #f5ebff;
+                    font-weight: 700;
+                    flex: 1;
+                }
+                #lobby-copy-btn {
+                    background: rgba(15, 23, 42, .52);
+                    border: 1px solid rgba(192, 132, 252, .28);
+                    border-radius: 10px;
+                    color: #e9d5ff;
+                    cursor: pointer;
+                    padding: 8px 12px;
+                    font-size: .88rem;
+                    transition: border-color .18s ease, background .18s ease, transform .18s ease;
+                }
+                #lobby-copy-btn:hover {
+                    border-color: rgba(216, 180, 254, .72);
+                    background: rgba(76, 29, 149, .24);
+                    transform: translateY(-1px);
+                }
+
+                .lobby-note {
+                    margin: 0;
+                    color: rgba(148, 163, 184, .82);
+                    font-size: .9rem;
+                    line-height: 1.45;
+                }
+                .lobby-players-box {
+                    background: rgba(2, 6, 23, .28);
+                    border: 1px solid rgba(148, 163, 184, .14);
+                    border-radius: 16px;
+                    padding: 14px 16px;
+                }
+                .lobby-players-box p { margin: 0 0 8px 0; color: #94a3b8; font-size: .88rem; }
+                #lobby-players-list {
+                    list-style: none;
+                    margin: 0;
+                    padding: 0;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
+                }
+                #lobby-players-list li { color: #e9d5ff; font-size: .98rem; }
+                #lobby-players-list li.local { color: #7dd3fc; }
+
+                #lobby-join-input {
+                    padding: 14px 16px;
+                    background: rgba(2, 6, 23, .4);
+                    border: 1px solid rgba(148, 163, 184, .24);
+                    border-radius: 14px;
+                    color: #f8fbff;
+                    font-family: 'Orbitron', sans-serif;
+                    font-size: 1.2rem;
+                    font-weight: 700;
+                    letter-spacing: .3em;
+                    text-transform: uppercase;
+                    text-align: center;
+                    outline: none;
+                    width: 100%;
+                    box-sizing: border-box;
+                    transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+                }
+                #lobby-join-input::placeholder {
+                    color: rgba(226, 232, 240, .32);
+                    letter-spacing: .22em;
+                }
+                #lobby-join-input:focus {
+                    border-color: rgba(192, 132, 252, .78);
+                    box-shadow: 0 0 0 4px rgba(168, 85, 247, .12);
+                    transform: translateY(-1px);
+                }
+                #lobby-status {
+                    margin: 0;
+                    font-size: .92rem;
+                    min-height: 1.2em;
+                }
+                #lobby-status.ok  { color: #4ade80; }
+                #lobby-status.err { color: #f87171; }
+
+                .lobby-waiting {
+                    background: linear-gradient(135deg, rgba(8, 47, 73, .34), rgba(15, 23, 42, .58));
+                    border: 1px solid rgba(125, 211, 252, .18);
+                    border-radius: 16px;
+                    padding: 12px 14px;
+                    color: #cbd5e1;
+                    font-size: .92rem;
+                    line-height: 1.45;
+                }
+
+                .lobby-solo-row { display: flex; justify-content: center; margin-top: 22px; }
+                .lobby-solo-btn {
+                    background: rgba(15, 23, 42, .28);
+                    border: 1px solid rgba(148, 163, 184, .22);
+                    border-radius: 999px;
+                    color: #cbd5e1;
+                    padding: 11px 24px;
+                    cursor: pointer;
+                    font-family: 'Rajdhani', sans-serif;
+                    font-weight: 700;
+                    font-size: .98rem;
+                    transition: transform .18s ease, border-color .18s ease, background .18s ease;
+                }
+                .lobby-solo-btn:hover {
+                    transform: translateY(-1px);
+                    border-color: rgba(125, 211, 252, .44);
+                    background: rgba(14, 116, 144, .14);
+                }
+
+                @keyframes lobby-rise {
+                    from {
+                        opacity: 0;
+                        transform: translateY(14px);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translateY(0);
+                    }
+                }
+
+                @media (max-width: 900px) {
+                    #lobby-screen { padding: 20px 14px; }
+                    .lobby-wrap { padding: 20px; border-radius: 22px; }
+                    .lobby-server-row { grid-template-columns: 1fr; }
+                    .lobby-panels { grid-template-columns: 1fr; }
+                    .lobby-divider {
+                        padding: 2px 0;
+                        letter-spacing: .22em;
+                    }
+                    .lobby-divider::before,
+                    .lobby-divider::after {
+                        width: 72px;
+                        height: 1px;
+                    }
+                }
+            </style>
+
+            <div class="lobby-wrap">
+                <div class="lobby-hero">
+                    <p class="lobby-kicker">Coop locale • 1 à 4 joueurs</p>
+                    <h1 class="lobby-title">CRYSTAL <span>GUARDIAN</span></h1>
+                    <p class="lobby-subtitle">Créez une room locale ou rejoignez une partie existante avec un code court. Même flux réseau, interface plus lisible.</p>
+                </div>
+
+                <!-- Server URL config -->
+                <div class="lobby-server-row">
+                    <div class="lobby-server-copy">
+                        <label for="lobby-server-url">Serveur</label>
+                        <span class="lobby-server-hint">Par défaut, le jeu réutilise la même adresse que la page ouverte. Remplacez-la seulement pour un relais externe spécifique.</span>
+                    </div>
+                    <input id="lobby-server-url" type="text" value=""
+                        placeholder="ws://localhost:3000/ws" spellcheck="false" />
+                </div>
+
+                <div class="lobby-panels">
+                    <!-- LEFT: Create -->
+                    <div class="lobby-panel">
+                        <h2>🏰 CRÉER UNE PARTIE</h2>
+                        <p class="lobby-panel-copy">Ouvrez une room, partagez le code affiché, puis lancez la partie quand tout le monde est prêt.</p>
+                        <button class="lobby-btn lobby-btn-primary" id="lobby-create-btn">Créer la room</button>
+
+                        <!-- Shown after room creation -->
+                        <div id="lobby-host-area" class="hidden">
+                            <div id="lobby-code-display">
+                                <span id="lobby-code-value">——————</span>
+                                <button id="lobby-copy-btn" title="Copier">📋 Copier</button>
+                            </div>
+                            <p class="lobby-note">
+                                Partagez ce code + l'adresse serveur à vos amis.
+                            </p>
+                            <div class="lobby-players-box">
+                                <p>Joueurs (<span id="lobby-player-count">1</span>/4)</p>
+                                <ul id="lobby-players-list">
+                                    <li class="local">▶ Vous (Hôte)</li>
+                                </ul>
+                            </div>
+                            <button class="lobby-btn lobby-btn-primary" id="lobby-start-btn">▶ LANCER LA PARTIE</button>
+                        </div>
+                    </div>
+
+                    <div class="lobby-divider">OU</div>
+
+                    <!-- RIGHT: Join -->
+                    <div class="lobby-panel">
+                        <h2>🔗 REJOINDRE</h2>
+                        <p class="lobby-panel-copy">Entrez le code fourni par l'hôte. Le champ accepte désormais normalement toutes les lettres tapées au clavier.</p>
+                        <input id="lobby-join-input" type="text" placeholder="CODE" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+                        <button class="lobby-btn lobby-btn-secondary" id="lobby-join-btn">Rejoindre</button>
+                        <p id="lobby-status"></p>
+
+                        <!-- Shown after joining -->
+                        <div id="lobby-client-area" class="hidden">
+                            <div class="lobby-waiting">
+                                ⌛ En attente que l'hôte lance la partie…
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Solo shortcut -->
+                <div class="lobby-solo-row">
+                    <button class="lobby-solo-btn" id="lobby-solo-btn">▶ Jouer en solo</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Start Screen -->
+        <div id="start-screen" class="hidden">
+            <div class="start-content">
+                <h1 class="game-title">CRYSTAL GUARDIAN</h1>
+                <p class="game-subtitle">Protégez le cristal. Survivez à la nuit.</p>
+                <div class="controls-preview">
+                    <p><strong>ZQSD</strong> - Déplacement</p>
+                    <p><strong>Clic Gauche</strong> - Attaquer/Récolter</p>
+                    <p><strong>B</strong> - Menu Construction</p>
+                    <p><strong>1-5</strong> - Sélection rapide</p>
+                </div>
+                <div class="start-buttons">
+                    <button id="start-button">▶ JOUER</button>
+                    <button id="test-mode-button">🛠️ MODE TEST</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+
+</html>

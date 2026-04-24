@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:kenney.nl)",
+      "WebFetch(domain:itch.io)",
+      "WebFetch(domain:pixelfrog-assets.itch.io)",
+      "Bash(python3 *)",
+      "Bash(node --input-type=module)",
+      "Bash(node --check js/core/SpriteManager.js)",
+      "Bash(node --check js/entities/Player.js)",
+      "Bash(node --check js/entities/Enemy.js)",
+      "Bash(node --check js/systems/BuildingSystem.js)",
+      "Bash(node --check js/entities/ResourceNode.js)",
+      "Bash(netsh advfirewall *)",
+      "Bash(xargs wc *)",
+      "Bash(node --check js/core/Game.js)",
+      "Bash(node --check js/network/NetworkManager.js)",
+      "Bash(node --check js/world/Cave.js)",
+      "Bash(node --check js/systems/WaveSystem.js)",
+      "Bash(node --check js/main.js)"
+    ]
+  }
+}
