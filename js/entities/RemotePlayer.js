@@ -45,6 +45,7 @@ export class RemotePlayer extends Entity {
         this._animState   = 'idle';
         this._facingLeft  = false;
         this._animFrame   = 0;
+        this._currentAnimKey = 'adventure_idle';
         this.level        = 1;
         this.maxHealth    = 120;
         this.health       = 120;
@@ -81,6 +82,7 @@ export class RemotePlayer extends Entity {
         this._animFrame  = data.frame ?? 0;
         this.level       = data.lvl   ?? 1;
         this._slot       = data.slot  ?? this._slot ?? 1;
+        this._currentAnimKey = data.animKey ?? this._getAdventureAnimKey(this._slot, this._animState);
         this._caveId     = data.cave  ?? null;
         this._inCave     = !!data.cave;
     }
@@ -98,13 +100,18 @@ export class RemotePlayer extends Entity {
         ctx.translate(this.x, this.y);
 
         const DRAW = 64;
-        const STATIC_DRAW = 38;
-
         // Map animation state to sprite key
         const animKey = this._getAnimKey(this._slot, this._animState);
         const bodyFlip = Math.cos(this.spriteFacingAngle || 0) < 0;
+        const adventureAnimKey = this._currentAnimKey || this._getAdventureAnimKey(this._slot, this._animState);
 
-        const drawn = spriteManager.drawStaticPlayerFrame(ctx, STATIC_DRAW, bodyFlip) || spriteManager.drawDirectionalPlayerFrame(
+        const drawn = spriteManager.drawAdventurePlayerFrame(
+            ctx,
+            adventureAnimKey,
+            this._animFrame || 0,
+            48,
+            bodyFlip
+        ) || spriteManager.drawDirectionalPlayerFrame(
             ctx,
             this._animState || 'idle',
             this._animFrame || 0,
@@ -190,5 +197,18 @@ export class RemotePlayer extends Entity {
         if (state === 'run') return 'warrior_run';
         if (state === 'attack') return 'warrior_attack';
         return 'warrior_idle';
+    }
+
+    _getAdventureAnimKey(slot, state) {
+        if (state === 'hurt') return 'adventure_hurt';
+        if (state === 'dash') return 'adventure_jump';
+        if (state === 'run') return 'adventure_walk';
+        if (state !== 'attack') return 'adventure_idle';
+
+        const s = Math.max(1, Math.min(5, Number(slot) || 1));
+        if (s === 4) return 'adventure_bow';
+        if (s === 3) return 'adventure_thrust';
+        if (s === 2) return 'adventure_sword_back';
+        return 'adventure_sword';
     }
 }

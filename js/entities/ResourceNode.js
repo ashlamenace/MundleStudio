@@ -169,6 +169,10 @@ export class ResourceNode extends Entity {
      * Override die to give resources
      */
     die() {
+        if (this.resourceType === 'wood') {
+            this.spawnTreeStumpMark();
+        }
+
         // Add resources to player
         const weatherEffects = this.game.dayNight.getWeatherEffects();
         const amount = Math.floor(this.resourceAmount * weatherEffects.resourceBonus);
@@ -185,6 +189,38 @@ export class ResourceNode extends Entity {
         }
 
         super.die();
+    }
+
+    spawnTreeStumpMark() {
+        if (!this.game.groundMarks) return;
+        if (this.game.groundMarks.length > 150) this.game.groundMarks.shift();
+
+        this.game.groundMarks.push({
+            x: this.x,
+            y: this.y,
+            scale: this.scale,
+            age: 0,
+            lifetime: 120,
+            destroyed: false,
+            update(dt) {
+                this.age += dt;
+                if (this.age >= this.lifetime) this.destroyed = true;
+            },
+            render(ctx) {
+                const oak = spriteManager.get('cute_oak_tree');
+                if (!oak) return;
+
+                const alpha = Math.max(0, 1 - this.age / this.lifetime);
+                const drawW = 64 * this.scale;
+                const drawH = 96 * this.scale;
+
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(oak, 0, 0, 32, 48, this.x - drawW / 2, this.y - drawH * 0.88, drawW, drawH);
+                ctx.restore();
+            }
+        });
     }
 
     /**
@@ -277,6 +313,15 @@ export class ResourceNode extends Entity {
 
     renderTree(ctx) {
         const s = this.scale;
+        const oak = spriteManager.get('cute_oak_tree');
+
+        if (oak) {
+            const drawW = 64 * s;
+            const drawH = 96 * s;
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(oak, 32, 0, 32, 48, -drawW / 2, -drawH * 0.88, drawW, drawH);
+            return;
+        }
 
         // Pick a tree sprite variant based on position hash (1-4)
         const variant = ((Math.floor(this.x / 32) * 7 + Math.floor(this.y / 32) * 13) & 3) + 1;
@@ -319,6 +364,14 @@ export class ResourceNode extends Entity {
 
     renderRock(ctx) {
         const s = this.scale;
+        const decor = spriteManager.get('cute_outdoor_decor');
+        if (decor) {
+            const variant = (Math.floor(this.x / 32) * 11 + Math.floor(this.y / 32) * 7) & 3;
+            const drawSize = 32 * s;
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(decor, variant * 16, 3 * 16, 16, 16, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
+            return;
+        }
 
         // Pick rock variant
         const variant = ((Math.floor(this.x / 32) * 11 + Math.floor(this.y / 32) * 7) & 3) + 1;

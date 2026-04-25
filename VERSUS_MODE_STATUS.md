@@ -53,6 +53,7 @@ Le principe cible est :
 - spawn des ennemis sur le contour de l'ile cible en versus
 - elimination d'un joueur quand son cristal est detruit
 - victoire quand un seul cristal reste vivant
+- mode test solo versus : une partie avec un seul joueur actif ne declenche plus de victoire automatique
 - respawn sur le cristal avec perte de ressources
 - PvP fonctionnel et degats sur les batiments ennemis
 - defense autoritative cote proprietaire pour garder la synchro reseau
@@ -78,11 +79,13 @@ Le principe cible est :
 
 - synchronisation des slots actifs et elimines
 - resync des cristaux actifs dans les paquets de match
+- skip de journee / nuit gere par vote reseau : l'hote ne lance la nuit que lorsque tous les joueurs eligibles ont vote
 
 ### Interface
 
 - panneau HUD pour l'etat des cristaux (slots restants)
 - recapitulatif de fin de match cote versus
+- bouton de skip affiche l'avancement du vote en multijoueur
 
 ## Ce qui reste a faire
 
@@ -94,6 +97,7 @@ Le principe cible est :
 ### Reseau / etat de partie
 
 - gerer proprement les cas de reconnexion ou resync tardif
+- verifier en vraie session que le vote de nuit reste correct apres depart/reconnexion d'un joueur
 
 ### Interface
 
@@ -110,6 +114,7 @@ Le principe cible est :
 
 - la boucle de partie principale est en place, mais la synchronisation en vraie session multi doit encore etre testee en conditions reelles
 - les cristaux actifs sont calcules a partir des joueurs presents au lancement ; la gestion complete d'un depart en cours de partie reste a finaliser
+- le mode versus solo sert de sandbox de test et ne donne pas de victoire automatique tant qu'un seul joueur est actif
 - l'equilibrage fin de la perte de ressources, des turrets et du tempo de victoire reste a ajuster apres playtests
 
 ## Prochaine etape recommandee

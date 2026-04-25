@@ -77,6 +77,11 @@ export class Player extends Entity {
         this._animFrame  = 0;
         this._animTimer  = 0;
         this._facingLeft = false;
+        this._currentAnimKey = 'adventure_idle';
+        this._actionAnimKey = null;
+        this._actionAnimTimer = 0;
+        this._hurtAnimTimer = 0;
+        this._meleeSwingAlt = false;
 
         // Bow sprites
         this.bowSprites = {};
@@ -379,23 +384,38 @@ export class Player extends Entity {
         const isRanged = tool?.type === 'ranged';
         const isShooting = this.attackCooldown > 0 && isRanged;
 
+        if (this._hurtAnimTimer > 0) {
+            this._hurtAnimTimer = Math.max(0, this._hurtAnimTimer - dt);
+        }
+        if (this._actionAnimTimer > 0) {
+            this._actionAnimTimer = Math.max(0, this._actionAnimTimer - dt);
+            if (this._actionAnimTimer <= 0) this._actionAnimKey = null;
+        }
+
         let newState;
-        if (isAttacking || isShooting) newState = 'attack';
+        if (this._hurtAnimTimer > 0) newState = 'hurt';
+        else if (this._actionAnimKey === 'adventure_jump') newState = 'dash';
+        else if (isAttacking || isShooting) newState = 'attack';
         else if (isMoving) newState = 'run';
         else newState = 'idle';
+
+        const animKey = this._getAdventureAnimKey(tool, newState);
 
         if (newState !== this._animState) {
             this._animState = newState;
             this._animFrame = 0;
             this._animTimer = 0;
+        } else if (animKey !== this._currentAnimKey) {
+            this._animFrame = 0;
+            this._animTimer = 0;
         }
+        this._currentAnimKey = animKey;
 
-        const fps = newState === 'attack' ? 14 : 8;
+        const fps = newState === 'attack' ? 14 : newState === 'hurt' ? 12 : 8;
         this._animTimer += dt;
         if (this._animTimer >= 1 / fps) {
             this._animTimer = 0;
             this._animFrame++;
-            const animKey = this._getAnimKey(tool, newState);
             const anim = spriteManager.playerAnims[animKey];
             if (anim && this._animFrame >= anim.frames) {
                 // Always loop back to frame 0 so held-attack animations restart
@@ -404,6 +424,22 @@ export class Player extends Entity {
         }
 
         this._facingLeft = Math.cos(this.facingAngle) < 0;
+    }
+
+    _getAdventureAnimKey(tool, state) {
+        if (state === 'hurt') return 'adventure_hurt';
+        if (state === 'dash') return 'adventure_jump';
+        if (state === 'run') return 'adventure_walk';
+        if (state !== 'attack') return 'adventure_idle';
+
+        if (this._actionAnimKey) return this._actionAnimKey;
+        if (tool?.type === 'ranged') return 'adventure_bow';
+        if (tool?.toolType === 'pickaxe') return 'adventure_thrust';
+        if (tool?.toolType === 'axe') return 'adventure_sword_back';
+        if (tool?.type === 'build') return 'adventure_sword';
+        if (tool?.specialEffect === 'fire') return 'adventure_flame_punch';
+        if ((tool?.tier || 1) >= 4) return 'adventure_power';
+        return 'adventure_sword';
     }
 
     _getAnimKey(tool, state) {
@@ -457,6 +493,9 @@ export class Player extends Entity {
      */
     performAction() {
         const tool = this.tools[this.selectedSlot];
+        this._actionAnimKey = this._chooseActionAnimKey(tool);
+        const actionAnim = spriteManager.playerAnims[this._actionAnimKey];
+        this._actionAnimTimer = actionAnim ? actionAnim.frames / 14 : 0.35;
 
         if (tool.type === 'melee') {
             this.game.audioSystem?.playSwing?.();
@@ -479,6 +518,18 @@ export class Player extends Entity {
             this.isAttacking = true;
             this.attackAnimation = 1;
         }
+    }
+
+    _chooseActionAnimKey(tool) {
+        if (tool?.type === 'ranged') return 'adventure_bow';
+        if (tool?.toolType === 'pickaxe') return 'adventure_thrust';
+        if (tool?.toolType === 'axe') return 'adventure_sword_back';
+        if (tool?.type === 'build') return 'adventure_sword';
+        if (tool?.specialEffect === 'fire') return 'adventure_flame_punch';
+        if ((tool?.tier || 1) >= 4) return 'adventure_power';
+
+        this._meleeSwingAlt = !this._meleeSwingAlt;
+        return this._meleeSwingAlt ? 'adventure_sword' : 'adventure_sword_back';
     }
 
     /**
@@ -959,6 +1010,8 @@ export class Player extends Entity {
 
     performDash() {
         this.skills.dash.cooldown = this.skills.dash.maxCooldown;
+        this._actionAnimKey = 'adventure_jump';
+        this._actionAnimTimer = 0.35;
         const move = this.game.input.getMovementVector();
 
         // If not moving, dash forward
@@ -1040,6 +1093,7 @@ export class Player extends Entity {
 
         this.health -= amount;
         this.invincibleTime = 0.5;
+        this._hurtAnimTimer = 0.35;
 
         // Flash screen red
         const flashIntensity = Math.min(amount / this.maxHealth, 0.5);
@@ -1072,17 +1126,23 @@ export class Player extends Entity {
         // Sprite animation
         const tool = this.tools[this.selectedSlot];
         const animKey = this._getAnimKey(tool, this._animState || 'idle');
-        const DRAW = 64;
-        const STATIC_DRAW = 38;
+        const DRAW = 48;
         const bodyFlip = Math.cos(this.spriteFacingAngle || 0) < 0;
-        const drawnSprite = spriteManager.drawStaticPlayerFrame(ctx, STATIC_DRAW, bodyFlip) || spriteManager.drawDirectionalPlayerFrame(
+        const adventureAnimKey = this._currentAnimKey || this._getAdventureAnimKey(tool, this._animState || 'idle');
+        const drawnSprite = spriteManager.drawAdventurePlayerFrame(
+            ctx,
+            adventureAnimKey,
+            this._animFrame || 0,
+            DRAW,
+            bodyFlip
+        ) || spriteManager.drawDirectionalPlayerFrame(
             ctx,
             this._animState || 'idle',
             this._animFrame || 0,
             this.spriteFacingAngle || 0,
-            DRAW
+            64
         ) || spriteManager.drawUnitFrame(
-            ctx, animKey, this._animFrame || 0, DRAW, DRAW, bodyFlip
+            ctx, animKey, this._animFrame || 0, 64, 64, bodyFlip
         );
 
         if (!drawnSprite) {
@@ -1091,7 +1151,9 @@ export class Player extends Entity {
             );
         }
 
-        this.renderEquippedTool(ctx, tool);
+        if (!this._currentAnimKey?.startsWith('adventure_') || this._animState !== 'attack') {
+            this.renderEquippedTool(ctx, tool);
+        }
 
         // Level display below player
         const levelText = `Lv.${this.level}`;

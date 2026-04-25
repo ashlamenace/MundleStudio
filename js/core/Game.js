@@ -933,6 +933,7 @@ export class Game {
         // Load sprites (async but non-blocking)
         spriteManager.loadAll().then(() => {
             console.log('[GAME] Sprites loaded successfully');
+            this.world?._buildChunks?.();
         }).catch(err => {
             console.error('[GAME] Error loading sprites:', err);
         });

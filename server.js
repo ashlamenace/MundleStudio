@@ -35,6 +35,13 @@ const ROOT = __dirname;
 const httpServer = http.createServer((req, res) => {
     let urlPath = req.url.split('?')[0]; // strip query string
     if (urlPath === '/') urlPath = '/index.html';
+    try {
+        urlPath = decodeURIComponent(urlPath);
+    } catch {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('Bad request');
+        return;
+    }
 
     const filePath = path.join(ROOT, urlPath);
 

@@ -411,9 +411,10 @@ export class NetworkManager {
             angle  : p.facingAngle,
             dirAngle: p.spriteFacingAngle ?? p.facingAngle,
             anim   : p._animState  ?? 'idle',
+            animKey: p._currentAnimKey ?? null,
             flip   : p._facingLeft ?? false,
             frame  : p._animFrame  ?? 0,
-            slot   : p.currentSlot ?? 1,
+            slot   : p.selectedSlot ?? p.currentSlot ?? 1,
             lvl    : p.level       ?? 1,
             // Null when in overworld; cave ID string when in a cave
             cave   : this.game.inCave ? (this.game._currentCaveId ?? null) : null

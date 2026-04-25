@@ -4,6 +4,7 @@
  */
 
 import { Utils } from '../core/Utils.js';
+import { spriteManager } from '../core/SpriteManager.js';
 import { ResourceNode } from '../entities/ResourceNode.js';
 import { buildVersusArena } from './VersusArena.js';
 
@@ -863,6 +864,7 @@ export class World {
                 canvas.width  = cp;
                 canvas.height = cp;
                 const octx = canvas.getContext('2d');
+                octx.imageSmoothingEnabled = false;
 
                 const startTX = cx * ct;
                 const startTY = cy * ct;
@@ -875,16 +877,112 @@ export class World {
                         const lx = (tx - startTX) * ts;
                         const ly = (ty - startTY) * ts;
 
-                        octx.fillStyle = this.getTileColor(type, tx, ty);
-                        octx.fillRect(lx, ly, ts, ts);
+                        if (!this._renderCuteFantasyTile(octx, type, lx, ly, ts)) {
+                            octx.fillStyle = this.getTileColor(type, tx, ty);
+                            octx.fillRect(lx, ly, ts, ts);
 
-                        this._renderTileDetailsStatic(octx, tx, ty, lx, ly, type);
+                            this._renderTileDetailsStatic(octx, tx, ty, lx, ly, type);
+                        }
+
+                        this._renderCuteOutdoorDecor(octx, tx, ty, lx, ly, type, ts);
                     }
                 }
 
                 this.offscreenChunks[cy][cx] = canvas;
             }
         }
+    }
+
+    _renderCuteFantasyTile(ctx, type, x, y, size) {
+        const spriteKey = this._getCuteFantasyTileKey(type);
+        if (!spriteKey) return false;
+
+        const tile = spriteManager.get(spriteKey);
+        if (!tile) return false;
+
+        ctx.drawImage(tile, x, y, size, size);
+        return true;
+    }
+
+    _getCuteFantasyTileKey(type) {
+        switch (type) {
+            case TileType.GRASS:
+                return 'cute_grass_middle';
+            case TileType.WATER:
+                return 'cute_water_middle';
+            case TileType.DIRT:
+            case TileType.MUD:
+                return 'cute_path_middle';
+            default:
+                return null;
+        }
+    }
+
+    _renderCuteOutdoorDecor(ctx, tileX, tileY, x, y, type, size) {
+        if (!this._canPlaceCuteOutdoorDecor(type)) return false;
+
+        const sheet = spriteManager.get('cute_outdoor_decor');
+        if (!sheet) return false;
+
+        const seed = this._tileDecorSeed(tileX, tileY);
+        const roll = seed % 100;
+        const biome = this.biomes?.[tileY]?.[tileX] ?? null;
+
+        let cells = null;
+        if (type === TileType.GRASS) {
+            if (roll < (biome === BiomeType.FOREST ? 18 : 13)) {
+                cells = [
+                    { col: 0, row: 0 }, { col: 1, row: 0 }, { col: 2, row: 0 },
+                    { col: 0, row: 1 }, { col: 1, row: 1 }
+                ];
+            } else if (roll < 19) {
+                cells = [
+                    { col: 0, row: 8 }, { col: 1, row: 8 }, { col: 2, row: 8 }, { col: 3, row: 8 },
+                    { col: 0, row: 9 }, { col: 1, row: 9 }, { col: 2, row: 9 }, { col: 3, row: 9 },
+                    { col: 0, row: 10 }, { col: 1, row: 10 }, { col: 2, row: 10 }, { col: 3, row: 10 },
+                    { col: 0, row: 11 }, { col: 1, row: 11 }, { col: 2, row: 11 }, { col: 3, row: 11 }
+                ];
+            }
+        } else if (type === TileType.DIRT || type === TileType.MUD) {
+            if (roll < 8) {
+                cells = [
+                    { col: 0, row: 0 }, { col: 1, row: 0 }, { col: 2, row: 0 },
+                    { col: 0, row: 1 }, { col: 1, row: 1 }
+                ];
+            } else if (roll < 11) {
+                cells = [
+                    { col: 0, row: 0 }, { col: 1, row: 0 }, { col: 2, row: 0 }
+                ];
+            }
+        } else if (type === TileType.SAND) {
+            if (roll < 7) {
+                cells = [
+                    { col: 0, row: 5 }, { col: 1, row: 5 }, { col: 2, row: 5 }
+                ];
+            }
+        }
+
+        if (!cells) return false;
+
+        const cell = cells[Math.floor(seed / 100) % cells.length];
+        ctx.drawImage(sheet, cell.col * 16, cell.row * 16, 16, 16, x, y, size, size);
+        return true;
+    }
+
+    _canPlaceCuteOutdoorDecor(type) {
+        return type === TileType.GRASS ||
+            type === TileType.DIRT ||
+            type === TileType.MUD ||
+            type === TileType.SAND ||
+            type === TileType.STONE ||
+            type === TileType.SANDSTONE;
+    }
+
+    _tileDecorSeed(tileX, tileY) {
+        let seed = Math.imul(tileX + 0x9e3779b9, 374761393) ^ Math.imul(tileY + 0x85ebca6b, 668265263);
+        seed ^= seed >>> 13;
+        seed = Math.imul(seed, 1274126177);
+        return (seed ^ (seed >>> 16)) >>> 0;
     }
 
     /**

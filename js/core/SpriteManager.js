@@ -31,6 +31,16 @@ class SpriteManager {
 
         // Animation frame counts for player
         this.playerAnims = {
+            adventure_idle:        { key: 'adventure_player', row: 0, frames: 6 },
+            adventure_walk:        { key: 'adventure_player', row: 1, frames: 6 },
+            adventure_jump:        { key: 'adventure_player', row: 2, frames: 6 },
+            adventure_sword_back:  { key: 'adventure_player', row: 5, frames: 5 },
+            adventure_sword:       { key: 'adventure_player', row: 6, frames: 5 },
+            adventure_power:       { key: 'adventure_player', row: 8, frames: 5 },
+            adventure_thrust:      { key: 'adventure_player', row: 9, frames: 7 },
+            adventure_flame_punch: { key: 'adventure_player', row: 10, frames: 8 },
+            adventure_bow:         { key: 'adventure_player', row: 12, frames: 4 },
+            adventure_hurt:        { key: 'adventure_player', row: 18, frames: 4 },
             warrior_idle:   { key: 'warrior_idle',    frames: 8 },
             warrior_run:    { key: 'warrior_run',     frames: 6 },
             warrior_attack: { key: 'warrior_attack1', frames: 4 },
@@ -90,6 +100,7 @@ class SpriteManager {
     async _loadSprites() {
         const ts  = 'assets/Tiny Swords (Free Pack)/Tiny Swords (Free Pack)';
         const ken = 'assets/kenney_tiny-dungeon';
+        const cute = 'assets/Cute_Fantasy_Free';
 
         const entries = [
             // ── Player (Blue) ──────────────────────────────────────────────────
@@ -112,6 +123,7 @@ class SpriteManager {
             ['player_guardian_sheet', 'assets/sprites/player/player_guardian_sheet.png'],
             ['player_phantom', 'assets/sprites/player/player_phantom.png'],
             ['phantom_idle', 'assets/sprites/player/phantom_idle.png'],
+            ['adventure_player', 'assets/sprites/player/Adventure_Character_Simple.png'],
 
             // ── Enemy sprites ──────────────────────────────────────────────────
             // Red Pawn  → grunt, poisonFrog
@@ -199,6 +211,13 @@ class SpriteManager {
             ['tool_pickaxe',    `${ts}/Terrain/Resources/Tools/Tool_04.png`],
             ['deco_stump1',     `${ts}/Terrain/Resources/Wood/Trees/Stump 1.png`],
             ['deco_stump2',     `${ts}/Terrain/Resources/Wood/Trees/Stump 2.png`],
+
+            // Cute Fantasy free pack
+            ['cute_grass_middle', `${cute}/Tiles/Grass_Middle.png`],
+            ['cute_water_middle', `${cute}/Tiles/Water_Middle.png`],
+            ['cute_path_middle',  `${cute}/Tiles/Path_Middle.png`],
+            ['cute_oak_tree',     `${cute}/Oak_Tree_Small.png`],
+            ['cute_outdoor_decor', `${cute}/Outdoor_Decor_Free.png`],
         ];
 
         await Promise.all(entries.map(([key, path]) => this._loadImage(key, path)));
@@ -242,6 +261,36 @@ class SpriteManager {
         ctx.save();
         if (flipX) { ctx.scale(-1, 1); }
         ctx.drawImage(img, sx, 0, fw, fh, -drawW / 2, -drawH / 2, drawW, drawH);
+        ctx.restore();
+        return true;
+    }
+
+    drawAdventurePlayerFrame(ctx, animKey, frame, drawSize, flipX = false) {
+        const anim = this.playerAnims[animKey];
+        if (!anim) return false;
+        const img = this.sprites[anim.key];
+        if (!img) return false;
+
+        const fw = 48;
+        const fh = 48;
+        const actualFrame = frame % anim.frames;
+        const sx = actualFrame * fw;
+        const sy = anim.row * fh;
+
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        if (flipX) ctx.scale(-1, 1);
+        ctx.drawImage(
+            img,
+            sx,
+            sy,
+            fw,
+            fh,
+            -drawSize / 2,
+            -drawSize / 2,
+            drawSize,
+            drawSize
+        );
         ctx.restore();
         return true;
     }
