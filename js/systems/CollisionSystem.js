@@ -75,8 +75,10 @@ export class CollisionSystem {
             for (let dy = -cellRadius; dy <= cellRadius; dy++) {
                 const key = ((centerCellX + dx) & 0xFFFF) << 16 |
                             ((centerCellY + dy) & 0xFFFF);
-                if (this.grid.has(key)) {
-                    nearby.push(...this.grid.get(key));
+                const cell = this.grid.get(key);
+                if (cell) {
+                    // Avoid spread operator — it allocates a new arguments array
+                    for (let i = 0; i < cell.length; i++) nearby.push(cell[i]);
                 }
             }
         }

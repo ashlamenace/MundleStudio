@@ -1988,12 +1988,6 @@ export class Building {
                 break;
         }
 
-        const mouse = this.game.input?.mouse;
-        const hover = !!mouse && Utils.distance(mouse.worldX, mouse.worldY, this.x, this.y) < this.collisionRadius + 8;
-        if (hover) {
-            this.renderTurretSubtypeBadge(ctx, palette.accent);
-        }
-
         if (this.fireCooldown > this.fireRate * 0.65) {
             ctx.strokeStyle = palette.accent;
             ctx.globalAlpha = 0.22 + tier * 0.05;

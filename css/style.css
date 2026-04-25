@@ -1575,6 +1575,25 @@ body {
     font-size: 9px;
 }
 
+.dev-label {
+    display: block;
+    width: 100%;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.45);
+    margin-bottom: 2px;
+}
+
+.dev-select {
+    padding: 3px 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #fff;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: var(--font-display);
+}
+
 #dev-toggle {
     position: fixed;
     top: 10px;

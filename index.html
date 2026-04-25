@@ -369,6 +369,51 @@
                     <button class="dev-btn time-speed-btn" data-speed="10">10x Ultra Rapide</button>
                 </div>
             </div>
+
+            <!-- Sections uniquement en mode 1v1v1v1 -->
+            <div class="dev-section hidden" data-versus-section>
+                <h4>🗡️ Raids Entrants</h4>
+                <div class="dev-buttons">
+                    <button class="dev-btn" data-action="versus-raid-swarm">🐛 Swarm</button>
+                    <button class="dev-btn" data-action="versus-raid-siege">🏰 Siège</button>
+                    <button class="dev-btn" data-action="versus-raid-mixed">⚔️ Mixte</button>
+                    <button class="dev-btn" data-action="versus-force-offer">📜 Forcer Offre</button>
+                </div>
+            </div>
+            <div class="dev-section hidden" data-versus-section>
+                <h4>🔮 Cristal Local</h4>
+                <div class="dev-buttons">
+                    <button class="dev-btn" data-action="versus-crystal-low">💔 20%</button>
+                    <button class="dev-btn" data-action="versus-crystal-half">💛 50%</button>
+                    <button class="dev-btn" data-action="versus-crystal-full">💚 Full</button>
+                </div>
+            </div>
+            <div class="dev-section hidden" data-versus-section>
+                <h4>👥 Adversaires Virtuels</h4>
+                <div class="dev-buttons">
+                    <small class="dev-label">Ajouter cristal :</small>
+                    <button class="dev-btn" data-action="versus-add-east">🔴 EST</button>
+                    <button class="dev-btn" data-action="versus-add-south">🟢 SUD</button>
+                    <button class="dev-btn" data-action="versus-add-west">🟡 OUEST</button>
+                </div>
+                <div class="dev-buttons">
+                    <small class="dev-label">Éliminer :</small>
+                    <button class="dev-btn" data-action="versus-elim-east">💀 EST</button>
+                    <button class="dev-btn" data-action="versus-elim-south">💀 SUD</button>
+                    <button class="dev-btn" data-action="versus-elim-west">💀 OUEST</button>
+                </div>
+                <div class="dev-buttons">
+                    <small class="dev-label">HP adversaire :</small>
+                    <select id="dev-opp-slot-select" class="dev-select">
+                        <option value="east">EST</option>
+                        <option value="south">SUD</option>
+                        <option value="west">OUEST</option>
+                    </select>
+                    <button class="dev-btn" data-action="versus-opp-low">💔 20%</button>
+                    <button class="dev-btn" data-action="versus-opp-half">💛 50%</button>
+                    <button class="dev-btn" data-action="versus-opp-full">💚 Full</button>
+                </div>
+            </div>
         </div>
 
         <!-- Dev Panel Toggle Button -->

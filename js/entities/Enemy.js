@@ -6,6 +6,16 @@ import { Entity } from './Entity.js';
 import { Utils } from '../core/Utils.js';
 import { spriteManager } from '../core/SpriteManager.js';
 
+// Pre-defined frozen directive tables — avoids creating a new object every call
+const DIRECTIVE_TABLES = Object.freeze({
+    swarm:   Object.freeze({ player: 1.12, crystal: 1.08, economy: 1.18, wall: 0.9,  turret: 1,    support: 1,   utility: 1 }),
+    elite:   Object.freeze({ player: 1.06, crystal: 1,    economy: 1,    wall: 1.18, turret: 1.25, support: 1,   utility: 1 }),
+    ranged:  Object.freeze({ player: 1.08, crystal: 1,    economy: 1,    wall: 1,    turret: 1.4,  support: 1.2, utility: 1 }),
+    siege:   Object.freeze({ player: 1,    crystal: 1.1,  economy: 1,    wall: 1.45, turret: 1.22, support: 1,   utility: 1 }),
+    boss:    Object.freeze({ player: 1.18, crystal: 1.3,  economy: 1,    wall: 1.15, turret: 1.2,  support: 1,   utility: 1 }),
+    default: Object.freeze({ player: 1,    crystal: 1,    economy: 1,    wall: 1,    turret: 1,    support: 1,   utility: 1 }),
+});
+
 // Enemy types configuration
 export const EnemyTypes = {
     grunt: {
@@ -808,10 +818,11 @@ export class Enemy extends Entity {
             }
         }
 
-        // Avoid other enemies
-        const nearby = this.game.getEnemies();
+        // Avoid other enemies — use spatial hash instead of scanning all enemies
+        const sepRadius = this.collisionRadius * 3 + 20;
+        const nearby = this.game.collisionSystem?.getNearby(this.x, this.y, sepRadius) ?? [];
         for (const other of nearby) {
-            if (other === this) continue;
+            if (other === this || other.type !== 'enemy') continue;
             const d = this.distanceTo(other);
             if (d < this.collisionRadius + other.collisionRadius + 5) {
                 const pushAngle = this.angleTo(other);
@@ -884,15 +895,15 @@ export class Enemy extends Entity {
     }
 
     getTurretDangerAt(x, y) {
-        const buildings = this.game.buildingSystem.buildings;
+        // Use per-frame cached turret list from Game to avoid re-filtering all buildings each call
+        const turrets = this.game.getActiveTurrets();
         let danger = 0;
-        for (const building of buildings) {
-            if (building.type !== 'turret' || building.destroyed) continue;
-            const dist = Utils.distance(x, y, building.x, building.y);
-            if (dist >= building.range) continue;
-            const levelBonus = 1 + ((building.level || 1) - 1) * 0.2;
-            const proximity = 1 - dist / Math.max(1, building.range);
-            danger += proximity * levelBonus;
+        for (let i = 0; i < turrets.length; i++) {
+            const t = turrets[i];
+            const dist = Utils.distance(x, y, t.x, t.y);
+            if (dist >= t.range) continue;
+            const levelBonus = 1 + ((t.level || 1) - 1) * 0.2;
+            danger += (1 - dist / Math.max(1, t.range)) * levelBonus;
         }
         return danger;
     }
@@ -901,7 +912,9 @@ export class Enemy extends Entity {
         if (this.targetCrystalSlot) {
             const crystal = this.game.getCrystalForSlot?.(this.targetCrystalSlot) ?? null;
             if (crystal && !crystal.destroyed && crystal.health > 0) return crystal;
-            return this.game.getClosestAliveCrystal?.(this) ?? this.game.crystal;
+            // Target crystal is gone — this enemy should already be destroyed by handleCrystalDestroyed.
+            // Return null so it doesn't wander across islands to attack someone else's crystal.
+            return null;
         }
         return this.game.crystal;
     }
@@ -982,30 +995,7 @@ export class Enemy extends Entity {
     }
 
     getDirectiveMultipliers() {
-        const defaults = {
-            player: 1,
-            crystal: 1,
-            turret: 1,
-            wall: 1,
-            economy: 1,
-            support: 1,
-            utility: 1
-        };
-
-        switch (this.aiDirective) {
-            case 'swarm':
-                return { ...defaults, player: 1.12, crystal: 1.08, economy: 1.18, wall: 0.9 };
-            case 'elite':
-                return { ...defaults, turret: 1.25, wall: 1.18, player: 1.06 };
-            case 'ranged':
-                return { ...defaults, turret: 1.4, support: 1.2, player: 1.08 };
-            case 'siege':
-                return { ...defaults, wall: 1.45, turret: 1.22, crystal: 1.1 };
-            case 'boss':
-                return { ...defaults, crystal: 1.3, turret: 1.2, player: 1.18, wall: 1.15 };
-            default:
-                return defaults;
-        }
+        return DIRECTIVE_TABLES[this.aiDirective] ?? DIRECTIVE_TABLES.default;
     }
 
     createAIProfile(enemyType) {

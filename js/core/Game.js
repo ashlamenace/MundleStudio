@@ -849,6 +849,56 @@ export class Game {
                 const godBtn = document.getElementById('god-mode-btn');
                 if (godBtn) godBtn.classList.toggle('active', this.godMode);
                 break;
+
+            // --- Versus debug ---
+            case 'versus-raid-swarm':
+                this.devVersusReceiveRaid('swarm');
+                break;
+            case 'versus-raid-siege':
+                this.devVersusReceiveRaid('siege');
+                break;
+            case 'versus-raid-mixed':
+                this.devVersusReceiveRaid('mixed');
+                break;
+            case 'versus-force-offer':
+                this.devVersusForceOffer();
+                break;
+            case 'versus-crystal-low':
+                this.devVersusSetLocalCrystalHealth(0.2);
+                break;
+            case 'versus-crystal-half':
+                this.devVersusSetLocalCrystalHealth(0.5);
+                break;
+            case 'versus-crystal-full':
+                this.devVersusSetLocalCrystalHealth(1.0);
+                break;
+            case 'versus-add-east':
+                this.devVersusAddOpponent('east');
+                break;
+            case 'versus-add-south':
+                this.devVersusAddOpponent('south');
+                break;
+            case 'versus-add-west':
+                this.devVersusAddOpponent('west');
+                break;
+            case 'versus-elim-east':
+                this.devVersusEliminateSlot('east');
+                break;
+            case 'versus-elim-south':
+                this.devVersusEliminateSlot('south');
+                break;
+            case 'versus-elim-west':
+                this.devVersusEliminateSlot('west');
+                break;
+            case 'versus-opp-low':
+                this.devVersusSetOpponentHealth(0.2);
+                break;
+            case 'versus-opp-half':
+                this.devVersusSetOpponentHealth(0.5);
+                break;
+            case 'versus-opp-full':
+                this.devVersusSetOpponentHealth(1.0);
+                break;
         }
     }
 
@@ -1052,6 +1102,96 @@ export class Game {
             this.dayNight.timeSpeed = speed;
             console.log(`[DEV] Time speed set to ${speed}x`);
         }
+    }
+
+    // ─── Versus debug helpers ─────────────────────────────────────────────────
+
+    /** Envoie une vague bonus sur l'île du joueur local (bypasse coût & cooldown). */
+    devVersusReceiveRaid(raidType) {
+        if (!this.waveSystem || this.gameMode !== GameMode.VERSUS_FFA) return;
+        const localSlot = this.playerSlot ?? this.resolvePlayerSlot();
+        if (!localSlot) return;
+
+        this.waveSystem.enqueueBonusVersusRaid({
+            attackerSlot: null,
+            targetSlots: [localSlot],
+            raidType,
+            wave: Math.max(1, (this.waveSystem.currentWave ?? 0) + 1),
+            countScale: 1.0
+        });
+        this.showNotification('[DEV] Raid entrant', `Vague ${raidType} lancée sur votre île.`, '#ff6b35', 2);
+    }
+
+    /** Fait apparaître immédiatement une offre de raid (crée un adversaire virtuel si besoin). */
+    devVersusForceOffer() {
+        if (this.gameMode !== GameMode.VERSUS_FFA) return;
+
+        // S'il n'y a pas encore d'adversaire, en crée un automatiquement
+        if (this.getBonusRaidTargetSlots().length === 0) {
+            const localSlot = this.playerSlot ?? this.resolvePlayerSlot();
+            const fakeSlot = VERSUS_SLOT_ORDER.find(s => s !== localSlot);
+            if (fakeSlot) this.devVersusAddOpponent(fakeSlot);
+        }
+
+        this.bonusRaidOffer = null;
+        this._bonusRaidOfferCooldown = 0;
+        this.bonusRaidOffer = this.createBonusRaidOffer();
+        if (this.bonusRaidOffer) {
+            this.showNotification('[DEV] Offre forcée', 'Une offre de raid est disponible.', '#ffd700', 2);
+        }
+    }
+
+    /** Règle les HP du cristal local à un pourcentage donné. */
+    devVersusSetLocalCrystalHealth(percent) {
+        const localSlot = this.playerSlot ?? this.resolvePlayerSlot();
+        const crystal = (localSlot ? this.getCrystalForSlot(localSlot) : null) ?? this.crystal;
+        if (!crystal) return;
+        crystal.health = Math.max(1, Math.floor(crystal.maxHealth * percent));
+    }
+
+    /** Crée un cristal adversaire virtuel pour le slot donné (pour tester le VersusStatus). */
+    devVersusAddOpponent(slot) {
+        if (this.gameMode !== GameMode.VERSUS_FFA) return;
+
+        if (!this.matchState.activeSlots.includes(slot)) {
+            this.matchState.activeSlots = [...this.matchState.activeSlots, slot]
+                .sort((a, b) => VERSUS_SLOT_ORDER.indexOf(a) - VERSUS_SLOT_ORDER.indexOf(b));
+        }
+        this.matchState.eliminatedSlots.delete(slot);
+        this.ensureVersusCrystals(this.matchState.activeSlots);
+        const label = VERSUS_SLOT_LABELS[slot] ?? slot;
+        this.showNotification('[DEV] Adversaire ajouté', `Cristal ${label} créé.`, '#00f5ff', 1.5);
+    }
+
+    /** Déclenche la destruction du cristal d'un slot adversaire. */
+    devVersusEliminateSlot(slot) {
+        if (this.gameMode !== GameMode.VERSUS_FFA) return;
+        if (slot === (this.playerSlot ?? this.resolvePlayerSlot())) {
+            this.showNotification('[DEV] Refusé', 'Ne peut pas éliminer votre propre slot.', '#ff4444', 1.5);
+            return;
+        }
+        const crystal = this.getCrystalForSlot(slot);
+        if (crystal && !crystal.destroyed) {
+            crystal.health = 0;
+            this.handleCrystalDestroyed(crystal);
+        } else if (!this.matchState.eliminatedSlots.has(slot)) {
+            this.matchState.eliminatedSlots.add(slot);
+            const label = VERSUS_SLOT_LABELS[slot] ?? slot;
+            this.showNotification('[DEV] Éliminé', `Slot ${label} marqué éliminé.`, '#ff8899', 1.5);
+        }
+    }
+
+    /** Règle les HP du cristal adversaire sélectionné dans le menu déroulant. */
+    devVersusSetOpponentHealth(percent) {
+        const select = document.getElementById('dev-opp-slot-select');
+        const slot = select?.value;
+        if (!slot) return;
+        const crystal = this.getCrystalForSlot(slot);
+        if (!crystal || crystal.destroyed) {
+            this.showNotification('[DEV] Pas de cristal', `Ajoutez d'abord le cristal ${slot}.`, '#ff8800', 1.5);
+            return;
+        }
+        crystal.health = Math.max(1, Math.floor(crystal.maxHealth * percent));
     }
 
     /**
@@ -1276,6 +1416,17 @@ export class Game {
             this.resourceSystem.addResource('stone', 500);
             this.resourceSystem.addResource('metal', 200);
             this.resourceSystem.addResource('amethyst', 100);
+
+            // Show/hide versus-only sections
+            const isVersus = this.gameMode === GameMode.VERSUS_FFA;
+            document.querySelectorAll('[data-versus-section]').forEach(el => {
+                el.classList.toggle('hidden', !isVersus);
+            });
+            // Update panel title to reflect game mode
+            const devTitle = document.querySelector('#dev-panel .dev-panel-header h3');
+            if (devTitle) {
+                devTitle.textContent = isVersus ? '🛠️ Dev — 1v1v1v1' : '🛠️ Mode Développeur';
+            }
         } else {
             this.devToggle.classList.add('hidden');
             this.devPanel.classList.add('hidden');
@@ -1649,6 +1800,15 @@ export class Game {
         if (slot && slot !== this.playerSlot && slot !== 'local') {
             const label = VERSUS_SLOT_LABELS[slot] ?? slot.toUpperCase();
             this.showNotification('Cristal détruit', `${label} est éliminé.`, '#ff8899', 1.8);
+
+            // Purge enemies that were raiding this slot — they must not cross to other islands
+            for (const entity of this.entities) {
+                if (entity.type === 'enemy' &&
+                    (entity.targetCrystalSlot === slot || entity._laneSlot === slot)) {
+                    entity.destroyed = true;
+                }
+            }
+            this._enemiesCache = null;
         }
 
         if (this.networkManager?.inRoom && this.networkManager?.isHost) {
@@ -1692,6 +1852,10 @@ export class Game {
             console.log('[GAME] Game loop stopped - running is false');
             return;
         }
+
+        // Reset per-frame caches at the very start of each frame
+        this._enemiesCache  = null;
+        this._activeTurrets = null;
 
         this.deltaTime = currentTime - this.lastTime;
         this.lastTime = currentTime;
@@ -1838,6 +2002,8 @@ export class Game {
 
         // Clean up dead entities
         this.entities = this.entities.filter(e => !e.destroyed);
+        this._enemiesCache  = null; // invalidate after cleanup
+        this._activeTurrets = null;
         // Purge destroyed enemies from the network registry so stale entries
         // never block resync re-spawns on client, or leak memory on host.
         this.networkManager?.cleanNetEnemies?.();
@@ -1891,8 +2057,12 @@ export class Game {
     update(dt) {
         if (this.state !== 'playing') return;
 
-        // Camera follows player
-        this.camera.follow(this.player.x, this.player.y);
+        // Camera follows player (unless user is panning via minimap)
+        if (this.minimap?.isPanning) {
+            this.camera.follow(this.minimap.panWorldX, this.minimap.panWorldY);
+        } else {
+            this.camera.follow(this.player.x, this.player.y);
+        }
         this.camera.update(dt);
 
         // Update HUD
@@ -2407,10 +2577,25 @@ export class Game {
     }
 
     /**
-     * Get all enemies in the game
+     * Get all enemies in the game (result is cached for the duration of each frame)
      */
     getEnemies() {
-        return this.entities.filter(e => e.type === 'enemy');
+        if (!this._enemiesCache) {
+            this._enemiesCache = this.entities.filter(e => e.type === 'enemy');
+        }
+        return this._enemiesCache;
+    }
+
+    /**
+     * Get active (non-destroyed) turrets — cached per frame to avoid re-filtering on every AI call
+     */
+    getActiveTurrets() {
+        if (!this._activeTurrets) {
+            this._activeTurrets = this.buildingSystem
+                ? this.buildingSystem.buildings.filter(b => b.type === 'turret' && !b.destroyed)
+                : [];
+        }
+        return this._activeTurrets;
     }
 
     /**
