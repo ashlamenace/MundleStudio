@@ -18,9 +18,11 @@ export const DEFAULT_URL = (!_loc.host || _loc.protocol === 'file:')
     ? 'ws://localhost:3000/ws'
     : `${_loc.protocol === 'https:' ? 'wss' : 'ws'}://${_loc.host}/ws`;
 
-// Pre-import Enemy so spawns never wait on a dynamic import
-let _EnemyClass = null;
+// Pre-import Enemy and Projectile so spawns never wait on a dynamic import
+let _EnemyClass      = null;
+let _ProjectileClass = null;
 import('../entities/Enemy.js').then(m => { _EnemyClass = m.Enemy; }).catch(() => {});
+import('../entities/Projectile.js').then(m => { _ProjectileClass = m.Projectile; }).catch(() => {});
 
 export class NetworkManager {
     constructor(game) {
@@ -39,6 +41,7 @@ export class NetworkManager {
         this._tCrystal  = 0;
         this._tDayNight = 0;
         this._tResync   = 0;
+        this._tWave     = 0;
 
         // Send rates (seconds between sends)
         this.HZ_PLAYER   = 1 / 20;  // 20 Hz — smooth player movement
@@ -46,6 +49,7 @@ export class NetworkManager {
         this.HZ_CRYSTAL  = 1 / 2;   // 2  Hz — crystal health sync
         this.HZ_DAYNIGHT = 1 / 5;   // 5  Hz — smoother day/night sync
         this.HZ_RESYNC   = 2;        // 2 s  — full enemy list resync (was 5 s, faster recovery)
+        this.HZ_WAVE     = 1;        // 1 s  — wave progress sync during active wave
 
         // Pending promise callbacks
         this._cb = {};
@@ -123,6 +127,11 @@ export class NetworkManager {
 
     // Send only to host
     _relayHost(data) { this._send({ type: 'RELAY_TO_HOST', data }); }
+
+    // Send to one specific player
+    _relayTo(targetId, data) {
+        this._send({ type: 'RELAY_TO', target: targetId, data });
+    }
 
     // ── Incoming message router ───────────────────────────────────────────────
 
@@ -215,8 +224,30 @@ export class NetworkManager {
                 }
                 break;
 
+            case 'VERSUS_STRUCTURE_HIT':
+                game.applyVersusStructureHit?.(msg);
+                break;
+
+            case 'VERSUS_PLAYER_HIT':
+                game.applyVersusPlayerHit?.(msg);
+                break;
+
             case 'CRYSTAL_HP':
-                if (game.crystal) game.crystal.health = msg.hp;
+                if (Array.isArray(msg.crystals)) {
+                    for (const crystalData of msg.crystals) {
+                        const crystal = crystalData.slot
+                            ? game.getCrystalForSlot?.(crystalData.slot)
+                            : game.crystal;
+                        if (!crystal) continue;
+                        crystal.health = crystalData.hp;
+                        crystal.maxHealth = crystalData.maxHp ?? crystal.maxHealth;
+                        if (crystalData.destroyed || crystal.health <= 0) {
+                            game.handleCrystalDestroyed?.(crystal);
+                        }
+                    }
+                } else if (game.crystal) {
+                    game.crystal.health = msg.hp;
+                }
                 break;
 
             case 'DAY_NIGHT_UPDATE':
@@ -255,6 +286,10 @@ export class NetworkManager {
                 if (msg._from !== this.playerId) this._receiveEnemyHit(msg.id, msg.hp);
                 break;
 
+            case 'PROJECTILE_SPAWN':
+                if (msg._from !== this.playerId) this._receiveProjectileSpawn(msg);
+                break;
+
             case 'RESOURCE_HIT':
                 if (msg._from !== this.playerId) this._receiveResourceHit(msg.id, msg.hp);
                 break;
@@ -268,7 +303,9 @@ export class NetworkManager {
                 break;
 
             case 'GAME_START':
-                if (!this.isHost && game.state !== 'playing') game.startNetworkGame(msg.seed);
+                if (!this.isHost && game.state !== 'playing') {
+                    game.startNetworkGame(msg.seed, { gameMode: msg.gameMode });
+                }
                 break;
 
             // ── Crystal upgrade ──
@@ -339,6 +376,15 @@ export class NetworkManager {
                 this._tResync = 0;
                 this._sendEnemyResync();
             }
+
+            if (this.game.waveSystem?.isWaveActive) {
+                this._tWave += dt;
+                if (this._tWave >= this.HZ_WAVE) {
+                    this._tWave = 0;
+                    const ws = this.game.waveSystem;
+                    this.broadcastWaveUpdate(ws.currentWave, true);
+                }
+            }
         }
     }
 
@@ -352,6 +398,7 @@ export class NetworkManager {
             hp     : Math.round(p.health),
             maxHp  : p.maxHealth,
             angle  : p.facingAngle,
+            dirAngle: p.spriteFacingAngle ?? p.facingAngle,
             anim   : p._animState  ?? 'idle',
             flip   : p._facingLeft ?? false,
             frame  : p._animFrame  ?? 0,
@@ -364,9 +411,9 @@ export class NetworkManager {
 
     _sendEnemyBatch() {
         const batch = [];
-        for (const e of this.game.getNetworkEnemyEntities?.() ?? []) {
-            if (e.type === 'enemy' && e._netId && !e.destroyed) {
-                batch.push({ id: e._netId, x: Math.round(e.x), y: Math.round(e.y), hp: Math.round(e.health) });
+        for (const [id, e] of this._netEnemies) {
+            if (!e.destroyed) {
+                batch.push({ id, x: Math.round(e.x), y: Math.round(e.y), hp: Math.round(e.health) });
             }
         }
         if (batch.length > 0) this._relayAll({ type: 'ENEMY_BATCH', batch });
@@ -374,18 +421,36 @@ export class NetworkManager {
 
     _sendEnemyResync() {
         const list = [];
-        for (const e of this.game.getNetworkEnemyEntities?.() ?? []) {
-            if (e.type === 'enemy' && e._netId && !e.destroyed) {
-                list.push({ id: e._netId, kind: e.enemyType, x: Math.round(e.x), y: Math.round(e.y), hp: Math.round(e.health), maxHp: Math.round(e.maxHealth) });
+        for (const [id, e] of this._netEnemies) {
+            if (!e.destroyed) {
+                list.push({
+                    id,
+                    kind: e.enemyType,
+                    x: Math.round(e.x),
+                    y: Math.round(e.y),
+                    hp: Math.round(e.health),
+                    maxHp: Math.round(e.maxHealth),
+                    scene: e._scene ?? 'overworld',
+                    targetSlot: e.targetCrystalSlot ?? null
+                });
             }
         }
         this._relayAll({ type: 'ENEMY_RESYNC', list });
     }
 
     _sendCrystalHP() {
-        if (this.game.crystal) {
-            this._relayAll({ type: 'CRYSTAL_HP', hp: Math.round(this.game.crystal.health) });
-        }
+        const crystals = this.game.getAllCrystals?.() ?? (this.game.crystal ? [this.game.crystal] : []);
+        if (crystals.length === 0) return;
+
+        this._relayAll({
+            type: 'CRYSTAL_HP',
+            crystals: crystals.map(crystal => ({
+                slot: crystal.ownerSlot ?? null,
+                hp: Math.round(crystal.health),
+                maxHp: Math.round(crystal.maxHealth),
+                destroyed: !!crystal.destroyed
+            }))
+        });
     }
 
     _sendDayNight() {
@@ -447,7 +512,9 @@ export class NetworkManager {
             x     : Math.round(enemy.x),
             y     : Math.round(enemy.y),
             hp    : enemy.health,
-            maxHp : enemy.maxHealth
+            maxHp : enemy.maxHealth,
+            scene : enemy._scene ?? 'overworld',
+            targetSlot: enemy.targetCrystalSlot ?? null,
         });
     }
 
@@ -467,7 +534,9 @@ export class NetworkManager {
         const enemy = new EnemyCls(this.game, data.x, data.y, data.kind ?? 'grunt');
         enemy._netId             = data.id;
         enemy._networkControlled = true;
-        enemy._scene             = 'overworld';
+        enemy._scene             = data.scene ?? 'overworld';
+        enemy.targetCrystalSlot  = data.targetSlot ?? null;
+        enemy._laneSlot          = enemy.targetCrystalSlot;
         enemy._netTargetX        = data.x;
         enemy._netTargetY        = data.y;
         enemy.health             = data.hp;
@@ -518,6 +587,8 @@ export class NetworkManager {
                 existing._netTargetY = item.y;
                 existing.health      = item.hp;
                 existing.maxHealth   = item.maxHp ?? existing.maxHealth;
+                if (item.scene) existing._scene = item.scene;
+                if (item.targetSlot !== undefined) existing.targetCrystalSlot = item.targetSlot;
             }
         }
     }
@@ -580,6 +651,54 @@ export class NetworkManager {
         }
     }
 
+    // Called when exiting a cave: broadcast death for all cave-scene enemies and
+    // remove them from the registry so overworld resync starts clean.
+    cleanupCaveEnemies() {
+        for (const [id, e] of this._netEnemies) {
+            if (e._scene === 'cave') {
+                if (!e.destroyed) {
+                    this._relayAll({ type: 'ENEMY_DEATH', id });
+                }
+                this._netEnemies.delete(id);
+            }
+        }
+    }
+
+    // ── Projectile sync ───────────────────────────────────────────────────────
+
+    // Called by Game.addProjectile for local-player projectiles
+    onProjectileSpawned(projectile) {
+        if (!this.ready || !this.inRoom) return;
+        this._relay({
+            type      : 'PROJECTILE_SPAWN',
+            x         : projectile.x,
+            y         : projectile.y,
+            angle     : projectile.angle,
+            speed     : projectile.speed,
+            range     : projectile.range,
+            size      : projectile.size,
+            color     : projectile.color,
+            projType  : projectile.type,
+            trailLen  : projectile.trailLength,
+            ownerId   : projectile.ownerId ?? null,
+        });
+    }
+
+    _receiveProjectileSpawn(data) {
+        if (!_ProjectileClass) return; // module not ready yet — skip; no visual is better than a crash
+        const proj = new _ProjectileClass(this.game, data.x, data.y, data.angle, {
+            speed      : data.speed,
+            range      : data.range,
+            size       : data.size,
+            color      : data.color,
+            type       : data.projType,
+            trailLength: data.trailLen,
+            ownerId    : data.ownerId ?? null,
+        });
+        proj._visualOnly = true; // no collision checks, no damage
+        this.game.addProjectile(proj);
+    }
+
     // ── Building events ───────────────────────────────────────────────────────
 
     onBuildingPlaced(building) {
@@ -619,16 +738,60 @@ export class NetworkManager {
         this._relayAll({ type: 'BUILDING_RESYNC', buildings });
     }
 
+    sendVersusStructureHit(payload) {
+        if (!this.ready || !this.inRoom) return;
+
+        const data = {
+            type: 'VERSUS_STRUCTURE_HIT',
+            attackerId: this.playerId,
+            targetType: payload?.targetType,
+            bId: payload?.bId ?? null,
+            slot: payload?.slot ?? null,
+            damage: Math.max(0, Number(payload?.damage ?? 0))
+        };
+
+        if (data.damage <= 0) return;
+
+        this._relayAll(data);
+    }
+
+    sendVersusPlayerHit(targetPlayerId, payload = {}) {
+        if (!this.ready || !this.inRoom) return;
+        if (!targetPlayerId || targetPlayerId === this.playerId) return;
+
+        const damage = Math.max(0, Number(payload?.damage ?? 0));
+        if (damage <= 0) return;
+
+        this._relayAll({
+            type: 'VERSUS_PLAYER_HIT',
+            attackerId: this.playerId,
+            targetId: targetPlayerId,
+            targetSlot: payload?.targetSlot ?? null,
+            damage,
+            damageType: payload?.damageType ?? 'melee',
+            slowFactor: payload?.slowFactor ?? 0,
+            slowDuration: payload?.slowDuration ?? 0
+        });
+    }
+
     // ── Host broadcasts start ─────────────────────────────────────────────────
 
     broadcastStart() {
         if (!this.isHost) return;
-        this._relayAll({ type: 'GAME_START', seed: this.game._worldSeed });
+        this._relayAll({
+            type: 'GAME_START',
+            seed: this.game._worldSeed,
+            gameMode: this.game.gameMode
+        });
     }
 
     broadcastFullState() {
         if (!this.isHost || !this.ready || !this.inRoom || this.game.state !== 'playing') return;
-        this._relayAll({ type: 'GAME_START', seed: this.game._worldSeed });
+        this._relayAll({
+            type: 'GAME_START',
+            seed: this.game._worldSeed,
+            gameMode: this.game.gameMode
+        });
         this._sendEnemyResync();
         this._sendCrystalHP();
         this._sendDayNight();
@@ -649,7 +812,13 @@ export class NetworkManager {
 
     broadcastWaveUpdate(waveNum, isActive) {
         if (!this.isHost) return;
-        this._relayAll({ type: 'WAVE_UPDATE', wave: waveNum, active: isActive });
+        const ws = this.game.waveSystem;
+        this._relayAll({
+            type      : 'WAVE_UPDATE',
+            wave      : waveNum,
+            active    : isActive,
+            spawnLeft : ws?.spawnQueue?.length ?? 0,
+        });
     }
 
     // ── Crystal upgrade sync ──────────────────────────────────────────────────
@@ -671,15 +840,15 @@ export class NetworkManager {
         this._relayAll({ type: 'CRYSTAL_UPGRADED', level: newLevel });
     }
 
-    /** Host → new joiner: full crystal state */
+    /** Host → specific joiner: full crystal state */
     sendCrystalSync(targetId) {
         if (!this.isHost) return;
         const upSys = this.game.crystalUpgradeSystem;
         if (!upSys) return;
         this._send({
-            type: 'RELAY_TO',
+            type  : 'RELAY_TO',
             target: targetId,
-            data: { type: 'CRYSTAL_SYNC', level: upSys.level, deposits: { ...upSys.deposits } }
+            data  : { type: 'CRYSTAL_SYNC', level: upSys.level, deposits: { ...upSys.deposits } }
         });
     }
 }

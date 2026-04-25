@@ -516,6 +516,47 @@
                     box-shadow: 0 0 0 4px rgba(56, 189, 248, .12);
                     transform: translateY(-1px);
                 }
+                .lobby-mode-row {
+                    display: grid;
+                    grid-template-columns: minmax(0, 1fr) 260px;
+                    gap: 18px;
+                    align-items: center;
+                    margin: 18px 0 10px;
+                    padding: 16px 18px;
+                    border-radius: 18px;
+                    background: rgba(15, 23, 42, .34);
+                    border: 1px solid rgba(148, 163, 184, .14);
+                }
+                .lobby-mode-copy label {
+                    display: block;
+                    margin-bottom: 6px;
+                    color: #cbd5e1;
+                    font-size: .88rem;
+                    letter-spacing: .12em;
+                    text-transform: uppercase;
+                }
+                .lobby-mode-copy span {
+                    color: rgba(148, 163, 184, .82);
+                    font-size: .92rem;
+                    line-height: 1.4;
+                }
+                #lobby-mode-select {
+                    width: 100%;
+                    min-width: 0;
+                    padding: 12px 14px;
+                    border: 1px solid rgba(148, 163, 184, .24);
+                    border-radius: 14px;
+                    outline: none;
+                    background: rgba(2, 6, 23, .42);
+                    color: #e0f2fe;
+                    font-family: 'Rajdhani', sans-serif;
+                    font-size: 1rem;
+                    font-weight: 700;
+                }
+                #lobby-mode-select:focus {
+                    border-color: rgba(125, 211, 252, .72);
+                    box-shadow: 0 0 0 4px rgba(56, 189, 248, .12);
+                }
 
                 .lobby-panels {
                     display: grid;
@@ -754,6 +795,7 @@
                     #lobby-screen { padding: 20px 14px; }
                     .lobby-wrap { padding: 20px; border-radius: 22px; }
                     .lobby-server-row { grid-template-columns: 1fr; }
+                    .lobby-mode-row { grid-template-columns: 1fr; }
                     .lobby-panels { grid-template-columns: 1fr; }
                     .lobby-divider {
                         padding: 2px 0;
@@ -782,6 +824,17 @@
                     </div>
                     <input id="lobby-server-url" type="text" value=""
                         placeholder="ws://localhost:3000/ws" spellcheck="false" />
+                </div>
+
+                <div class="lobby-mode-row">
+                    <div class="lobby-mode-copy">
+                        <label for="lobby-mode-select">Mode</label>
+                        <span>Le coop garde la carte actuelle. Le mode 1v1v1v1 utilise une arène 3x3 et limite la construction à votre île.</span>
+                    </div>
+                    <select id="lobby-mode-select">
+                        <option value="coop" selected>Coop</option>
+                        <option value="versus_ffa">1v1v1v1</option>
+                    </select>
                 </div>
 
                 <div class="lobby-panels">

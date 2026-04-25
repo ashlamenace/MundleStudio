@@ -7,7 +7,7 @@ import { Utils } from '../core/Utils.js';
 import { spriteManager } from '../core/SpriteManager.js';
 
 export class Crystal extends Entity {
-    constructor(game, x, y) {
+    constructor(game, x, y, options = {}) {
         super(game, x, y);
 
         this.type = 'crystal';
@@ -33,6 +33,10 @@ export class Crystal extends Entity {
 
         // Cannot move
         this.solid = true;
+        this.ownerSlot = options.ownerSlot ?? null;
+        this.isLocalCrystal = options.isLocalCrystal ?? true;
+        this.crystalStyleColor = options.color ?? null;
+        this._destructionTriggered = false;
     }
 
     update(deltaTime) {
@@ -98,7 +102,9 @@ export class Crystal extends Entity {
 
     takeDamage(amount, source) {
         super.takeDamage(amount, source);
-        this.game.camera.shake(8, 0.3);
+        if (this.isLocalCrystal) {
+            this.game.camera.shake(8, 0.3);
+        }
 
         // Spawn damage burst
         for (let i = 0; i < 5; i++) {
@@ -128,8 +134,44 @@ export class Crystal extends Entity {
         }
     }
 
+    triggerDestruction() {
+        if (this._destructionTriggered) return;
+        this._destructionTriggered = true;
+
+        for (let i = 0; i < 18; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 110 + Math.random() * 120;
+            this.game.addParticle({
+                x: this.x,
+                y: this.y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed - 40,
+                lifetime: 0.7 + Math.random() * 0.4,
+                age: 0,
+                destroyed: false,
+                update(dt) {
+                    this.x += this.vx * dt;
+                    this.y += this.vy * dt;
+                    this.vy += 180 * dt;
+                    this.age += dt;
+                    if (this.age >= this.lifetime) this.destroyed = true;
+                },
+                render(ctx) {
+                    const alpha = 1 - this.age / this.lifetime;
+                    ctx.fillStyle = `rgba(220, 180, 255, ${alpha})`;
+                    Utils.drawDiamond(ctx, this.x, this.y, 7, 10);
+                    ctx.fill();
+                }
+            });
+        }
+
+        if (this.isLocalCrystal) {
+            this.game.camera.shake(12, 0.35);
+        }
+    }
+
     render(ctx) {
-        const upSys  = this.game.crystalUpgradeSystem;
+        const upSys  = this.isLocalCrystal ? this.game.crystalUpgradeSystem : null;
         const lvl    = upSys ? upSys.level : 0;
         // Scale: 1.0 at lvl0 → 1.5 at lvl5
         const scale  = 1.0 + lvl * 0.1;
@@ -310,6 +352,8 @@ export class Crystal extends Entity {
             y + barHeight + 12
         );
 
+        if (!this.isLocalCrystal) return;
+
         // Crystal upgrade progress (if upgrade system present)
         const upSys = this.game.crystalUpgradeSystem;
         if (!upSys || upSys.isMaxLevel) return;
@@ -358,6 +402,7 @@ export class Crystal extends Entity {
 
     /** Tinted crystal color based on upgrade level */
     _getLevelColor() {
+        if (this.crystalStyleColor) return this.crystalStyleColor;
         const upSys = this.game.crystalUpgradeSystem;
         return upSys ? (upSys.currentData.color ?? '#9966ff') : '#9966ff';
     }

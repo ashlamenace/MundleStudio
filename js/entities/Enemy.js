@@ -386,6 +386,7 @@ export class Enemy extends Entity {
         this.retargetLockTimer = Utils.randomFloat(0.35, 0.9);
         this.lastThreatSource = null;
         this.lastThreatTimer = 0;
+        this.targetCrystalSlot = null;
         this.feintTimer = Utils.randomFloat(0.8, 1.8);
         this.feintDirection = Math.random() < 0.5 ? -1 : 1;
         this.strafeIntensity = Utils.randomFloat(0.15, 0.45);
@@ -702,14 +703,16 @@ export class Enemy extends Entity {
             return;
         }
 
-        const crystal = this.game.crystal;
+        const crystal = this.getAssignedCrystal();
         const directive = this.getDirectiveMultipliers();
         const candidates = [];
-        const crystalCategory = this.classifyTarget(crystal);
-        candidates.push({
-            target: crystal,
-            score: this.scoreTarget(crystal, crystalCategory, directive)
-        });
+        if (crystal && !crystal.destroyed && crystal.health > 0) {
+            const crystalCategory = this.classifyTarget(crystal);
+            candidates.push({
+                target: crystal,
+                score: this.scoreTarget(crystal, crystalCategory, directive)
+            });
+        }
 
         const playerInRange = distToPlayer <= this.visionRange * 1.2;
         if (playerInRange || this.aiProfile.weights.player >= 1.15 || this.lastThreatSource === player) {
@@ -725,7 +728,7 @@ export class Enemy extends Entity {
         // attack true blockers (walls/doors/barricades) in moveTowardsTarget().
 
         if (candidates.length === 0) {
-            this.target = crystal;
+            this.target = crystal ?? null;
             return;
         }
 
@@ -877,6 +880,13 @@ export class Enemy extends Entity {
         return danger;
     }
 
+    getAssignedCrystal() {
+        if (this.targetCrystalSlot) {
+            return this.game.getCrystalForSlot?.(this.targetCrystalSlot) ?? this.game.crystal;
+        }
+        return this.game.crystal;
+    }
+
     scoreTarget(target, category, directive, keepCurrent = false) {
         const dist = this.distanceTo(target);
         const healthRatio = (target.maxHealth > 0) ? (target.health / target.maxHealth) : 1;
@@ -906,7 +916,10 @@ export class Enemy extends Entity {
             score += (target.damage || 10) * 0.35;
             score += this.getTurretDangerAt(target.x, target.y) * 10;
         } else if (category === 'wall') {
-            const crystalDist = Utils.distance(target.x, target.y, this.game.crystal.x, this.game.crystal.y);
+            const assignedCrystal = this.getAssignedCrystal();
+            const crystalDist = assignedCrystal
+                ? Utils.distance(target.x, target.y, assignedCrystal.x, assignedCrystal.y)
+                : Infinity;
             if (crystalDist < 180) score += 26;
             if (this.aiProfile.breachFocus > 0.6) score += 14;
         } else if (category === 'economy') {
@@ -920,7 +933,7 @@ export class Enemy extends Entity {
 
     classifyTarget(target) {
         if (!target) return 'utility';
-        if (target === this.game.crystal) return 'crystal';
+        if (target === this.getAssignedCrystal()) return 'crystal';
         if (target === this.game.player) return 'player';
 
         const type = target.type;
@@ -937,7 +950,7 @@ export class Enemy extends Entity {
 
     isBuildingTarget(target) {
         if (!target) return false;
-        if (target === this.game.player || target === this.game.crystal) return false;
+        if (target === this.game.player || target === this.getAssignedCrystal()) return false;
         return typeof target.takeDamage === 'function' && typeof target.type === 'string';
     }
 
@@ -1035,7 +1048,7 @@ export class Enemy extends Entity {
     shouldAttackBlockingBuilding(building) {
         if (!building || building.destroyed) return false;
         const category = this.classifyTarget(building);
-        if (this.target !== this.game.crystal) return false;
+        if (this.target !== this.getAssignedCrystal()) return false;
         return category === 'wall';
     }
 
@@ -1590,7 +1603,8 @@ export class Enemy extends Entity {
 
             case 'voidPulse':
                 // AOE damage
-                const targets = [this.game.player, this.game.crystal, ...this.game.buildingSystem.buildings];
+                const crystal = this.getAssignedCrystal();
+                const targets = [this.game.player, crystal, ...this.game.buildingSystem.buildings].filter(Boolean);
                 targets.forEach(target => {
                     const dist = Utils.distance(this.x, this.y, target.x, target.y);
                     if (dist < 250) {
@@ -1936,7 +1950,7 @@ export class Enemy extends Entity {
         const buildingExplosionMultiplier = 3.0;
 
         // Damage player and crystal with normal explosion damage
-        const playerAndCrystal = [this.game.player, this.game.crystal];
+        const playerAndCrystal = [this.game.player, this.getAssignedCrystal()].filter(Boolean);
         for (const target of playerAndCrystal) {
             const dist = Utils.distance(this.x, this.y, target.x, target.y);
             if (dist < this.explosionRadius) {

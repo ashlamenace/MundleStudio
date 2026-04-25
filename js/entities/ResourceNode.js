@@ -49,6 +49,26 @@ const ResourceConfig = {
     }
 };
 
+function hashString(value) {
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i++) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+}
+
+function makeNodeSeed(x, y, resourceType) {
+    const px = Math.floor(x * 10);
+    const py = Math.floor(y * 10);
+    return (Math.imul(px, 73856093) ^ Math.imul(py, 19349663) ^ hashString(resourceType)) >>> 0;
+}
+
+function seededRandom(seed, salt = 0) {
+    const value = Math.sin((seed + salt + 1) * 12.9898) * 43758.5453;
+    return value - Math.floor(value);
+}
+
 export class ResourceNode extends Entity {
     constructor(game, x, y, resourceType = 'wood') {
         super(game, x, y);
@@ -59,27 +79,29 @@ export class ResourceNode extends Entity {
         // Get config
         const config = ResourceConfig[resourceType] || ResourceConfig.wood;
         this.config = config;
+        const nodeSeed = makeNodeSeed(x, y, resourceType);
 
         // Health
         this.maxHealth = config.health;
         this.health = this.maxHealth;
 
         // Size varies
-        this.scale = 0.8 + Math.random() * 0.4;
+        this.scale = 0.8 + seededRandom(nodeSeed, 11) * 0.4;
         this.width = 32 * this.scale;
         this.height = 32 * this.scale;
         this.collisionRadius = 16 * this.scale;
 
         // Resource amount
-        this.resourceAmount = Utils.randomInt(config.amount.min, config.amount.max);
+        const amountRange = Math.max(0, config.amount.max - config.amount.min);
+        this.resourceAmount = config.amount.min + Math.floor(seededRandom(nodeSeed, 23) * (amountRange + 1));
 
         // Visual variation
-        this.rotation = Math.random() * 0.2 - 0.1;
-        this.variation = Math.random();
+        this.rotation = seededRandom(nodeSeed, 31) * 0.2 - 0.1;
+        this.variation = seededRandom(nodeSeed, 37);
 
         // Animation
         this.shakeAmount = 0;
-        this.glowPhase = Math.random() * Math.PI * 2;
+        this.glowPhase = seededRandom(nodeSeed, 41) * Math.PI * 2;
 
         // Cannot be pushed
         this.solid = true;

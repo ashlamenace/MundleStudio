@@ -27,8 +27,8 @@ export const CRYSTAL_LEVELS = [
         glowAlpha: 0.48,
         maxHealth: 950,
         regenRate: 1.5,
-        unlocksBuildings: ['stoneWall', 'barricade', 'spikeTrap', 'basicTurret', 'woodMiner', 'stoneMiner'],
-        unlockLabel: 'Mur pierre · Tourelle · Collecteurs bois & pierre',
+        unlocksBuildings: ['stoneWall', 'barricade', 'spikeTrap', 'basicTurret', 'woodMiner', 'stoneMiner', 'workbench'],
+        unlockLabel: 'Mur pierre · Tourelle · Collecteurs bois & pierre · Établi',
         upgradeCost: { wood: 45, stone: 60, metal: 20 }
     },
     {
@@ -38,8 +38,8 @@ export const CRYSTAL_LEVELS = [
         glowAlpha: 0.52,
         maxHealth: 1150,
         regenRate: 2.0,
-        unlocksBuildings: ['metalWall', 'laserTurret', 'metalMiner', 'workbench', 'oilBarrel'],
-        unlockLabel: 'Mur métal · Tourelle laser · Extracteur métal · Établi',
+        unlocksBuildings: ['metalWall', 'laserTurret', 'metalMiner', 'oilBarrel'],
+        unlockLabel: 'Mur métal · Tourelle laser · Extracteur métal',
         upgradeCost: { stone: 35, metal: 55, amethyst: 15 }
     },
     {
@@ -111,10 +111,14 @@ export class CrystalUpgradeSystem {
         return BUILDING_CRYSTAL_REQ[key] ?? 0;
     }
 
+    getCurrentUpgradeCost() {
+        return this.game.scaleCost(this.currentData.upgradeCost, 'crystalUpgrade');
+    }
+
     /** Progress 0-1 toward next upgrade */
     getProgress() {
         if (this.isMaxLevel) return 1;
-        const cost = this.currentData.upgradeCost;
+        const cost = this.getCurrentUpgradeCost();
         if (!cost) return 1;
         let needed = 0, done = 0;
         for (const [r, n] of Object.entries(cost)) {
@@ -136,7 +140,7 @@ export class CrystalUpgradeSystem {
             return;
         }
 
-        const cost = this.currentData.upgradeCost;
+        const cost = this.getCurrentUpgradeCost();
         if (!cost) return;
         const deposited = {};
         let total = 0;
@@ -234,7 +238,7 @@ export class CrystalUpgradeSystem {
 
     _isComplete() {
         if (this.isMaxLevel) return false;
-        const cost = this.currentData.upgradeCost;
+        const cost = this.getCurrentUpgradeCost();
         if (!cost) return false;
         for (const [r, n] of Object.entries(cost)) {
             if ((this.deposits[r] ?? 0) < n) return false;
@@ -268,7 +272,7 @@ export class CrystalUpgradeSystem {
     }
 
     _missingText() {
-        const cost = this.currentData.upgradeCost ?? {};
+        const cost = this.getCurrentUpgradeCost() ?? {};
         const icons = { wood: '🪵', stone: '🪨', metal: '⚙️', amethyst: '💜' };
         const parts = [];
         for (const [r, n] of Object.entries(cost)) {

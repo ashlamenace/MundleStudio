@@ -18,7 +18,10 @@
       "Bash(node --check js/network/NetworkManager.js)",
       "Bash(node --check js/world/Cave.js)",
       "Bash(node --check js/systems/WaveSystem.js)",
-      "Bash(node --check js/main.js)"
+      "Bash(node --check js/main.js)",
+      "Bash(grep -v \"//\")",
+      "Bash(node --check server.js)",
+      "Bash(node --input-type=module --check)"
     ]
   }
 }

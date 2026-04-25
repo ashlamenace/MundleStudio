@@ -5,10 +5,12 @@
 
 import { Camera } from './Camera.js';
 import { Input } from './Input.js';
+import { GameMode, createMatchState, getGameModeConfig, normalizeGameMode } from './GameModeConfig.js';
 import { Utils } from './Utils.js';
 import { spriteManager } from './SpriteManager.js';
 import { VisualEffects } from './VisualEffects.js';
 import { World } from '../world/World.js';
+import { VERSUS_SLOT_ORDER, resolveVersusSlot } from '../world/VersusArena.js';
 import { Cave } from '../world/Cave.js';
 import { DayNightCycle } from '../world/DayNightCycle.js';
 import { Player } from '../entities/Player.js';
@@ -28,6 +30,7 @@ import { ArtifactSystem } from '../systems/ArtifactSystem.js';
 import { ObjectiveSystem } from '../systems/ObjectiveSystem.js';
 import { ChallengeSystem } from '../systems/ChallengeSystem.js';
 import { CrystalUpgradeSystem } from '../systems/CrystalUpgradeSystem.js';
+import { RemotePlayer } from '../entities/RemotePlayer.js';
 
 export const DEFAULT_DAY_DURATION = 90;
 export const DEFAULT_NIGHT_DURATION = 90;
@@ -72,6 +75,10 @@ export class Game {
         this._pendingRemotePlayers = [];
         this._pendingRemotePlayerStates = new Map();
         this._backgroundOverworldSimulation = false;
+        this.gameMode = GameMode.COOP;
+        this.gameModeConfig = getGameModeConfig(this.gameMode);
+        this.matchState = createMatchState(this.gameMode);
+        this.playerSlot = null;
 
         // Initialize core systems
         this.input = new Input(canvas);
@@ -89,6 +96,11 @@ export class Game {
         this.levelUpModal = document.getElementById('level-up-modal');
         this.buildingUpgradeModal = null;
         this.selectedUpgradeBuilding = null;
+        this.gameOverTitle = document.querySelector('#game-over-screen h1');
+        this.survivalTimeEl = document.getElementById('survival-time');
+        this.prestigeBonusEl = document.getElementById('prestige-bonus');
+        this.prestigeInfoEl = document.getElementById('prestige-info');
+        this.crystals = new Map();
 
         // Dev mode UI
         this.testModeButton = document.getElementById('test-mode-button');
@@ -96,6 +108,232 @@ export class Game {
         this.devToggle = document.getElementById('dev-toggle');
 
         this._setupUIListeners();
+    }
+
+    setGameMode(mode) {
+        this.gameMode = normalizeGameMode(mode);
+        this.gameModeConfig = getGameModeConfig(this.gameMode);
+        this.matchState = createMatchState(this.gameMode);
+    }
+
+    getModeRules() {
+        return this.gameModeConfig;
+    }
+
+    getLocalCrystal() {
+        return this.crystal ?? null;
+    }
+
+    getCrystalForSlot(slot) {
+        return this.crystals.get(slot) ?? null;
+    }
+
+    getAllCrystals() {
+        if (this.crystals?.size) return [...this.crystals.values()];
+        return this.crystal ? [this.crystal] : [];
+    }
+
+    getAliveCrystalSlots() {
+        return this.getAllCrystals()
+            .filter(crystal => crystal.ownerSlot && !crystal.destroyed && crystal.health > 0)
+            .map(crystal => crystal.ownerSlot);
+    }
+
+    getActiveVersusSlots() {
+        if (this.gameMode !== GameMode.VERSUS_FFA) return [];
+
+        const participantIds = new Set();
+        const localId = this.networkManager?.playerId ?? null;
+        if (localId) {
+            participantIds.add(localId);
+        } else {
+            participantIds.add('player_1');
+        }
+
+        for (const id of this._remotePlayers?.keys?.() ?? []) {
+            participantIds.add(id);
+        }
+
+        for (const id of this._pendingRemotePlayers ?? []) {
+            participantIds.add(id);
+        }
+
+        return [...participantIds]
+            .map(id => this.resolvePlayerSlot(id))
+            .filter(slot => VERSUS_SLOT_ORDER.includes(slot))
+            .sort((a, b) => VERSUS_SLOT_ORDER.indexOf(a) - VERSUS_SLOT_ORDER.indexOf(b));
+    }
+
+    resolvePlayerSlot(playerId = null) {
+        if (this.gameMode !== GameMode.VERSUS_FFA) return null;
+        return resolveVersusSlot(playerId ?? this.networkManager?.playerId ?? null);
+    }
+
+    canPlayerBuildAt(worldX, worldY, playerId = null) {
+        if (this.gameMode !== GameMode.VERSUS_FFA) return true;
+        const slot = this.resolvePlayerSlot(playerId);
+        return this.world?.canBuildAtForSlot(slot, worldX, worldY) ?? false;
+    }
+
+    getPlayerIdForSlot(slot) {
+        const index = VERSUS_SLOT_ORDER.indexOf(slot);
+        if (index < 0) return null;
+        return `player_${index + 1}`;
+    }
+
+    getRemotePlayers() {
+        return [...(this._remotePlayers?.values?.() ?? [])];
+    }
+
+    getRemotePlayerById(playerId) {
+        return this._remotePlayers?.get?.(playerId) ?? null;
+    }
+
+    getRemotePlayerForSlot(slot) {
+        const playerId = this.getPlayerIdForSlot(slot);
+        return playerId ? this.getRemotePlayerById(playerId) : null;
+    }
+
+    isSlotEliminated(slot) {
+        if (!slot) return false;
+        return this.matchState?.eliminatedSlots?.has(slot) ?? false;
+    }
+
+    getHostileRemotePlayersFor(ownerId = null) {
+        if (this.gameMode !== GameMode.VERSUS_FFA) return [];
+
+        const ownerSlot = this.resolvePlayerSlot(ownerId ?? this.networkManager?.playerId ?? null);
+        return this.getRemotePlayers().filter((remotePlayer) => {
+            if (!remotePlayer || remotePlayer.destroyed) return false;
+            if (!this._isRemotePlayerVisible(remotePlayer)) return false;
+
+            const targetSlot = this.resolvePlayerSlot(remotePlayer.playerId);
+            if (!targetSlot || this.isSlotEliminated(targetSlot)) return false;
+            return targetSlot !== ownerSlot;
+        });
+    }
+
+    applyVersusStructureHit(data) {
+        if (this.gameMode !== GameMode.VERSUS_FFA || this.state !== 'playing') return;
+
+        const damage = Math.max(0, Number(data?.damage ?? 0));
+        if (damage <= 0) return;
+
+        const attackerId = data?.attackerId ?? data?._from ?? null;
+        const attackerSlot = this.resolvePlayerSlot(attackerId);
+
+        if (data?.targetType === 'building') {
+            const building = this.buildingSystem?.buildings?.find((b) => b._netId === data?.bId);
+            if (!building || building.destroyed) return;
+
+            const ownerSlot = this.resolvePlayerSlot(building.ownerId);
+            if (!ownerSlot || !attackerSlot || ownerSlot === attackerSlot) return;
+            if (this.isSlotEliminated(ownerSlot) || this.isSlotEliminated(attackerSlot)) return;
+
+            building.takeDamage(damage);
+            return;
+        }
+
+        if (data?.targetType === 'crystal') {
+            const crystal = this.getCrystalForSlot(data?.slot);
+            if (!crystal || crystal.destroyed) return;
+
+            const targetSlot = crystal.ownerSlot ?? data?.slot ?? null;
+            if (!targetSlot || !attackerSlot || targetSlot === attackerSlot) return;
+            if (this.isSlotEliminated(targetSlot) || this.isSlotEliminated(attackerSlot)) return;
+
+            crystal.takeDamage(damage, { type: 'player', playerId: attackerId });
+            if (crystal.health <= 0) {
+                this.handleCrystalDestroyed(crystal);
+            }
+        }
+    }
+
+    applyVersusPlayerHit(data) {
+        if (this.gameMode !== GameMode.VERSUS_FFA || this.state !== 'playing') return;
+        if (this.matchState?.localPlayerEliminated) return;
+
+        const attackerId = data?.attackerId ?? data?._from ?? null;
+        const attackerSlot = this.resolvePlayerSlot(attackerId);
+        if (!attackerSlot || this.isSlotEliminated(attackerSlot)) return;
+
+        const targetSlot = data?.targetSlot ?? this.resolvePlayerSlot(data?.targetId ?? null);
+        const localSlot = this.playerSlot ?? this.resolvePlayerSlot();
+        if (!targetSlot || this.isSlotEliminated(targetSlot) || targetSlot === attackerSlot) return;
+
+        const damage = Math.max(0, Number(data?.damage ?? 0));
+        if (damage <= 0) return;
+
+        if (targetSlot === localSlot) {
+            this.player.takeDamage(damage, { type: 'remotePlayer', playerId: attackerId });
+
+            const slowFactor = Math.max(0, Math.min(0.6, Number(data?.slowFactor ?? 0)));
+            const slowDuration = Math.max(0, Number(data?.slowDuration ?? 0));
+            if (slowFactor > 0 && slowDuration > 0) {
+                this.player._enemySlowFactor = Math.max(this.player._enemySlowFactor || 0, slowFactor);
+                this.player._enemySlowUntil = Date.now() + (slowDuration * 1000);
+            }
+            return;
+        }
+
+        const remotePlayer = this.getRemotePlayerForSlot(targetSlot);
+        if (!remotePlayer) return;
+
+        remotePlayer.health = Math.max(0, remotePlayer.health - damage);
+        remotePlayer.flashTimer = 0.12;
+    }
+
+    getEconomyCostMultiplier(category = 'general') {
+        const economy = this.gameModeConfig?.economy ?? {};
+        switch (category) {
+            case 'crystalUpgrade':
+                return economy.crystalUpgradeCostMultiplier ?? 1;
+            case 'building':
+                return economy.buildingCostMultiplier ?? 1;
+            case 'buildingUpgrade':
+                return economy.buildingUpgradeCostMultiplier ?? 1;
+            case 'playerUpgrade':
+                return economy.playerUpgradeCostMultiplier ?? 1;
+            default:
+                return 1;
+        }
+    }
+
+    scaleCost(cost, category = 'general') {
+        if (!cost) return null;
+
+        const multiplier = this.getEconomyCostMultiplier(category);
+        const scaled = {};
+
+        for (const [resource, amount] of Object.entries(cost)) {
+            if (amount <= 0) continue;
+            scaled[resource] = multiplier === 1
+                ? amount
+                : Math.max(1, Math.ceil(amount * multiplier));
+        }
+
+        return scaled;
+    }
+
+    _getWorldDimensions() {
+        if (this.gameMode === GameMode.VERSUS_FFA) {
+            return { width: 5376, height: 5376 };
+        }
+        return { width: 3200, height: 3200 };
+    }
+
+    _normalizeStartOptions(devModeOrOptions = false, maybeOptions = null) {
+        if (typeof devModeOrOptions === 'object' && devModeOrOptions !== null) {
+            return {
+                devMode: !!devModeOrOptions.devMode,
+                gameMode: normalizeGameMode(devModeOrOptions.gameMode ?? this.gameMode)
+            };
+        }
+
+        return {
+            devMode: !!devModeOrOptions,
+            gameMode: normalizeGameMode(maybeOptions?.gameMode ?? this.gameMode)
+        };
     }
 
     _setupResize() {
@@ -456,6 +694,7 @@ export class Game {
         this.projectiles = [];
         this.particles   = [];
         this.groundMarks = [];  // persistent decals (blood, scorch, frost)
+        this.crystals    = new Map();
 
         // Night lighting offscreen canvas (recreated on resize)
         this._lightCanvas = document.createElement('canvas');
@@ -468,9 +707,14 @@ export class Game {
             this._pendingRemotePlayers = [];
         }
 
+        this.playerSlot = this.resolvePlayerSlot();
+
         // World generation (optimized size for performance)
         console.log('[GAME] Generating world...');
-        this.world = new World(this, 3200, 3200); // 100x100 tiles at 32px each
+        const worldDimensions = this._getWorldDimensions();
+        this.world = new World(this, worldDimensions.width, worldDimensions.height, {
+            mode: this.gameMode
+        });
         console.log('[GAME] World generated successfully');
 
         // Day/Night cycle (3 minutes total: 90s day, 90s night)
@@ -507,13 +751,13 @@ export class Game {
         // Player spawns at center
         const centerX = this.world.width / 2;
         const centerY = this.world.height / 2;
+        const spawnPoint = this.world.getSpawnPointForSlot(this.playerSlot) ?? { x: centerX, y: centerY };
 
-        this.player = new Player(this, centerX, centerY);
+        this.player = new Player(this, spawnPoint.x, spawnPoint.y);
         this.entities.push(this.player);
 
-        // Crystal spawns near player
-        this.crystal = new Crystal(this, centerX, centerY - 64);
-        this.entities.push(this.crystal);
+        // Crystals
+        this._spawnCrystals();
 
         // Spawn cave entrances around the map
         this.spawnCaveEntrances();
@@ -528,7 +772,7 @@ export class Game {
 
         // Camera setup
         this.camera.setWorldBounds(this.world.width, this.world.height);
-        this.camera.setPosition(centerX, centerY);
+        this.camera.setPosition(spawnPoint.x, spawnPoint.y);
 
         // UI
         console.log('[GAME] Initializing UI...');
@@ -541,10 +785,54 @@ export class Game {
         console.log('[GAME] Initialization complete!');
     }
 
+    _spawnCrystals() {
+        if (this.gameMode === GameMode.VERSUS_FFA && this.world?.arenaData?.slots) {
+            const crystalColors = {
+                north: '#7dd3fc',
+                east: '#fca5a5',
+                south: '#86efac',
+                west: '#fcd34d'
+            };
+
+            const activeSlots = this.getActiveVersusSlots();
+            for (const slot of activeSlots) {
+                const point = this.world.getCrystalPointForSlot(slot);
+                if (!point) continue;
+
+                const crystal = new Crystal(this, point.x, point.y, {
+                    ownerSlot: slot,
+                    isLocalCrystal: slot === this.playerSlot,
+                    color: crystalColors[slot] ?? null
+                });
+                this.crystals.set(slot, crystal);
+                this.entities.push(crystal);
+
+                if (slot === this.playerSlot) {
+                    this.crystal = crystal;
+                }
+            }
+
+            if (!this.crystal) {
+                this.crystal = this.crystals.get(this.playerSlot) ?? this.crystals.get(activeSlots[0]) ?? null;
+            }
+            return;
+        }
+
+        const centerX = this.world.width / 2;
+        const centerY = this.world.height / 2;
+        this.crystal = new Crystal(this, centerX, centerY - 64, {
+            isLocalCrystal: true
+        });
+        this.crystals.set('local', this.crystal);
+        this.entities.push(this.crystal);
+    }
+
     /**
      * Spawn cave entrances around the map
      */
     spawnCaveEntrances() {
+        if (this.world?.supportsCaves === false) return;
+
         const centerX = this.world.width / 2;
         const centerY = this.world.height / 2;
         const cavePoints = this.world.getCaveSpawnPoints?.();
@@ -577,8 +865,10 @@ export class Game {
     /**
      * Start a new game (with optional dev mode)
      */
-    startGame(devMode = false) {
-        this.devMode = devMode;
+    startGame(devModeOrOptions = false, maybeOptions = null) {
+        const options = this._normalizeStartOptions(devModeOrOptions, maybeOptions);
+        this.devMode = options.devMode;
+        this.setGameMode(options.gameMode);
         this.startScreen?.classList.add('hidden');
         this.gameOverScreen?.classList.add('hidden');
         document.getElementById('lobby-screen')?.classList.add('hidden');
@@ -616,8 +906,10 @@ export class Game {
      */
     restartGame() {
         // Calculate prestige
-        this.calculatePrestige();
-        this.startGame();
+        if (this.gameModeConfig.usesPrestige) {
+            this.calculatePrestige();
+        }
+        this.startGame({ gameMode: this.gameMode });
     }
 
     // ── Multiplayer: called by NetworkManager / main.js ───────────────────────
@@ -625,9 +917,10 @@ export class Game {
     /**
      * Client receives GAME_START from host — start as non-host.
      */
-    startNetworkGame(seed) {
+    startNetworkGame(seed, options = null) {
         document.getElementById('lobby-screen')?.classList.add('hidden');
         this.startScreen?.classList.add('hidden');
+        this.setGameMode(options?.gameMode ?? this.gameMode);
         Utils.seed(seed ?? Date.now());
         this.init();
 
@@ -655,23 +948,20 @@ export class Game {
             if (!this._pendingRemotePlayers.includes(id)) {
                 this._pendingRemotePlayers.push(id);
             }
-            // Notify lobby UI hook
             this._onLobbyPlayerJoined?.(id);
             return;
         }
 
-        import('../entities/RemotePlayer.js').then(({ RemotePlayer }) => {
-            if (this._remotePlayers.has(id)) return; // race-condition guard
-            const rp = new RemotePlayer(this, id);
-            const pendingState = this._pendingRemotePlayerStates.get(id);
-            if (pendingState) {
-                rp.applyState(pendingState);
-                this._pendingRemotePlayerStates.delete(id);
-            }
-            this._remotePlayers.set(id, rp);
-            // Remote players are managed separately from the entity array so they
-            // remain visible regardless of overworld/cave swaps.
-        });
+        // RemotePlayer is statically imported — creation is synchronous.
+        // Previously used a dynamic import() which left _remotePlayers empty for
+        // several frames (until the microtask resolved), making remote players invisible.
+        const rp = new RemotePlayer(this, id);
+        const pendingState = this._pendingRemotePlayerStates.get(id);
+        if (pendingState) {
+            rp.applyState(pendingState);
+            this._pendingRemotePlayerStates.delete(id);
+        }
+        this._remotePlayers.set(id, rp);
 
         this._onLobbyPlayerJoined?.(id);
     }
@@ -726,15 +1016,195 @@ export class Game {
     /**
      * End the game (crystal destroyed)
      */
-    gameOver() {
+    gameOver(details = null) {
+        const reason = details?.reason ?? this.matchState?.defeatReason ?? 'unknown';
         this.state = 'gameover';
 
-        document.getElementById('survival-time').textContent =
-            `Vous avez survécu ${this.survivalDays} jours`;
-        document.getElementById('prestige-bonus').textContent =
-            `${Math.min(50, this.survivalDays * 2)}%`;
+        if (this.gameOverTitle) {
+            if (reason === 'victory') {
+                this.gameOverTitle.textContent = 'VICTOIRE';
+            } else if (reason === 'crystal_destroyed' && this.gameModeConfig.supportsElimination) {
+                this.gameOverTitle.textContent = 'ÉLIMINÉ';
+            } else {
+                this.gameOverTitle.textContent = 'GAME OVER';
+            }
+        }
+
+        if (this.survivalTimeEl) {
+            this.survivalTimeEl.textContent = this._getGameOverMessage(reason);
+        }
+
+        if (this.prestigeInfoEl) {
+            this.prestigeInfoEl.classList.toggle('hidden', !this.gameModeConfig.usesPrestige);
+        }
+        if (this.prestigeBonusEl && this.gameModeConfig.usesPrestige) {
+            this.prestigeBonusEl.textContent = `${Math.min(50, this.survivalDays * 2)}%`;
+        }
 
         this.gameOverScreen.classList.remove('hidden');
+    }
+
+    _getGameOverMessage(reason) {
+        if (reason === 'victory') {
+            return 'Dernier cristal en vie. Victoire !';
+        }
+        if (reason === 'last_player_standing') {
+            return 'Un autre joueur est le dernier survivant.';
+        }
+        if (reason === 'crystal_destroyed' && this.gameModeConfig.supportsElimination) {
+            return 'Votre cristal a explosé. Vous êtes éliminé.';
+        }
+        if (reason === 'crystal_destroyed') {
+            return `Votre cristal a été détruit après ${this.survivalDays} jours`;
+        }
+        return `Vous avez survécu ${this.survivalDays} jours`;
+    }
+
+    evaluateVersusVictoryState() {
+        if (this.gameMode !== GameMode.VERSUS_FFA || this.state !== 'playing') return;
+        if (this.matchState.matchEnded) return;
+
+        const activeSlots = this.getActiveVersusSlots();
+        if (activeSlots.length === 0) return;
+
+        const aliveSlots = activeSlots.filter((slot) => !this.isSlotEliminated(slot));
+        if (aliveSlots.length > 1) return;
+
+        const winnerSlot = aliveSlots[0] ?? null;
+        this.matchState.matchEnded = true;
+        this.matchState.winnerSlot = winnerSlot;
+
+        if (winnerSlot && winnerSlot === this.playerSlot && !this.matchState.localPlayerEliminated) {
+            this.matchState.defeatReason = 'victory';
+            this.gameOver({ reason: 'victory' });
+            return;
+        }
+
+        if (!this.matchState.localPlayerEliminated) {
+            this.matchState.defeatReason = 'last_player_standing';
+            this.gameOver({ reason: 'last_player_standing' });
+        }
+    }
+
+    applyRespawnPenalty() {
+        if (!this.resourceSystem?.resources) return null;
+
+        const penalties = {
+            wood: 0.2,
+            stone: 0.2,
+            metal: 0.15,
+            amethyst: 0.1
+        };
+
+        const lost = {};
+        for (const [type, ratio] of Object.entries(penalties)) {
+            const current = Math.max(0, Math.floor(this.resourceSystem.resources[type] ?? 0));
+            if (current <= 0) continue;
+
+            const amount = Math.floor(current * ratio);
+            if (amount <= 0) continue;
+
+            this.resourceSystem.resources[type] = Math.max(0, current - amount);
+            lost[type] = amount;
+        }
+
+        this.resourceSystem.updateUI?.();
+        return Object.keys(lost).length > 0 ? lost : null;
+    }
+
+    getRespawnPointNearCrystal(crystal) {
+        const fallback = { x: crystal.x, y: crystal.y + 96 };
+        if (!this.world) return fallback;
+
+        const radii = [96, 128, 160, 192];
+        for (const radius of radii) {
+            for (let i = 0; i < 12; i++) {
+                const angle = (Math.PI * 2 / 12) * i;
+                const x = crystal.x + Math.cos(angle) * radius;
+                const y = crystal.y + Math.sin(angle) * radius;
+                if (!this.world.isPassable(x, y)) continue;
+
+                const blockedByBuilding = this.buildingSystem?.buildings?.some((building) => {
+                    if (!building?.solid || building.destroyed) return false;
+                    const minDist = (building.collisionRadius || 0) + (this.player?.collisionRadius || 16) + 8;
+                    return Utils.distance(x, y, building.x, building.y) < minDist;
+                });
+
+                if (!blockedByBuilding) return { x, y };
+            }
+        }
+
+        return fallback;
+    }
+
+    handleLocalPlayerDeath(player = this.player) {
+        if (this.state !== 'playing' || !player) return;
+
+        if (this.gameMode === GameMode.VERSUS_FFA && this.matchState.localCrystalDestroyed) {
+            this.matchState.localPlayerEliminated = true;
+            this.matchState.defeatReason = 'crystal_destroyed';
+            this.gameOver({ reason: 'crystal_destroyed' });
+            return;
+        }
+
+        if (this.gameModeConfig.respawnOnPlayerDeath && !this.matchState.localPlayerEliminated) {
+            const lost = this.applyRespawnPenalty();
+            this.respawnLocalPlayer(player);
+
+            if (lost) {
+                const lossText = Object.entries(lost)
+                    .map(([type, amount]) => `${amount} ${type}`)
+                    .join(' · ');
+                this.showNotification('Respawn', `Pénalité ressources: ${lossText}`, '#ffbb66', 2.2);
+            }
+            return;
+        }
+
+        this.matchState.defeatReason = 'player_death';
+        this.gameOver({ reason: 'player_death' });
+    }
+
+    handleCrystalDestroyed(crystal = this.getLocalCrystal()) {
+        if (this.state !== 'playing' || !crystal) return;
+
+        const slot = crystal.ownerSlot ?? 'local';
+        if (this.matchState.eliminatedSlots.has(slot)) return;
+
+        this.matchState.eliminatedSlots.add(slot);
+        crystal.triggerDestruction?.();
+        crystal.destroyed = true;
+
+        if (slot && slot !== this.playerSlot && slot !== 'local') {
+            this.showNotification('Cristal détruit', `${slot.toUpperCase()} est éliminé.`, '#ff8899', 1.8);
+        }
+
+        if (crystal === this.getLocalCrystal() || slot === this.playerSlot || slot === 'local') {
+            this.matchState.localCrystalDestroyed = true;
+            this.matchState.localPlayerEliminated = true;
+            this.matchState.defeatReason = 'crystal_destroyed';
+            this.gameOver({ reason: 'crystal_destroyed' });
+            return;
+        }
+
+        this.evaluateVersusVictoryState();
+    }
+
+    respawnLocalPlayer(player = this.player) {
+        const crystal = this.getLocalCrystal();
+        if (!player || !crystal) {
+            this.matchState.defeatReason = 'player_death';
+            this.gameOver({ reason: 'player_death' });
+            return;
+        }
+
+        player.health = player.maxHealth;
+        player.vx = 0;
+        player.vy = 0;
+        player.invincibleTime = 2;
+
+        const respawnPoint = this.getRespawnPointNearCrystal(crystal);
+        player.x = respawnPoint.x;
+        player.y = respawnPoint.y;
     }
 
     /**
@@ -902,8 +1372,20 @@ export class Game {
 
         // Crystal destruction and player death can happen while the player is
         // underground; the cave must not pause overworld danger.
-        if (this.crystal.health <= 0 || this.player.health <= 0) {
-            this.gameOver();
+        const shouldEvaluateCrystalHealth = !this.networkManager?.inRoom || !!this.networkManager?.isHost;
+        for (const crystal of this.getAllCrystals()) {
+            if (!shouldEvaluateCrystalHealth) continue;
+
+            const slot = crystal.ownerSlot ?? 'local';
+            if (!this.matchState.eliminatedSlots.has(slot) && crystal.health <= 0) {
+                this.handleCrystalDestroyed(crystal);
+            }
+        }
+
+        this.evaluateVersusVictoryState();
+
+        if (this.state === 'playing' && this.player?.health <= 0) {
+            this.handleLocalPlayerDeath(this.player);
         }
 
         // Check for pending level up
@@ -1112,9 +1594,13 @@ export class Game {
             }
 
             // Crystal light (larger)
-            if (this.crystal) {
-                const r = 110 + (this.crystalUpgradeSystem?.level ?? 0) * 15;
-                addLight(this.crystal.x, this.crystal.y, r, 0.5);
+            for (const crystal of this.getAllCrystals()) {
+                if (crystal.destroyed) continue;
+                const localCrystal = crystal === this.crystal;
+                const r = localCrystal
+                    ? 110 + (this.crystalUpgradeSystem?.level ?? 0) * 15
+                    : 90;
+                addLight(crystal.x, crystal.y, r, 0.5);
             }
 
             // Turrets & torches emit small light cones
@@ -1304,6 +1790,17 @@ export class Game {
      */
     addProjectile(projectile) {
         this.projectiles.push(projectile);
+        // Broadcast authoritative local projectiles so other clients see the visual.
+        // In versus we also relay owner-side turret shots.
+        const shouldBroadcast = !projectile._visualOnly && this.networkManager?.inRoom && (
+            projectile.owner === this.player ||
+            projectile.owner?.type === 'turret' ||
+            projectile.owner?.ownerId ||
+            projectile.ownerId
+        );
+        if (shouldBroadcast) {
+            this.networkManager?.onProjectileSpawned(projectile);
+        }
     }
 
     /**
@@ -1519,6 +2016,14 @@ export class Game {
         this.projectiles = [];
         this.particles   = [];
 
+        // Host registers cave enemies so clients receive ENEMY_SPAWN
+        if (this.networkManager?.isHost && this.networkManager?.inRoom) {
+            for (const enemy of this.currentCave.enemies) {
+                enemy._scene = 'cave';
+                this.networkManager.registerEnemy(enemy);
+            }
+        }
+
         // Move player to cave spawn
         this.player.x = this.currentCave.spawnX;
         this.player.y = this.currentCave.spawnY;
@@ -1544,7 +2049,8 @@ export class Game {
             this.projectiles = this.overworldProjectiles ?? [];
             this.particles   = [];
 
-            // Clear cave state
+            // Clear cave state — unregister cave enemies from network before clearing
+            this.networkManager?.cleanupCaveEnemies?.();
             this.currentCave    = null;
             this.inCave         = false;
             this._currentCaveId = null;
@@ -1870,7 +2376,7 @@ export class Game {
         }
 
         const nextLevel = building.level + 1;
-        const cost = building.upgradeCosts[nextLevel];
+        const cost = building.getUpgradeCost?.(nextLevel) ?? null;
         if (!cost) {
             this.refreshBuildingUpgradeModal();
             return;
@@ -1924,7 +2430,7 @@ export class Game {
         }
 
         const nextLevel = building.level + 1;
-        const cost = building.upgradeCosts[nextLevel] || {};
+        const cost = building.getUpgradeCost?.(nextLevel) || {};
 
         if (this.buildingUpgradeLevelEl) {
             this.buildingUpgradeLevelEl.textContent = `Niveau ${building.level} → ${nextLevel}`;
@@ -2150,16 +2656,20 @@ export class Game {
     getToolUpgradeCost(tool, currentTier) {
         const costs = {
             axe: {
-                1: { resources: { wood: 20, stone: 10 }, text: '20 Bois + 10 Pierre' },
-                2: { resources: { stone: 30, metal: 15 }, text: '30 Pierre + 15 Métal' }
+                1: { wood: 20, stone: 10 },
+                2: { stone: 30, metal: 15 }
             },
             pickaxe: {
-                1: { resources: { stone: 25, wood: 15 }, text: '25 Pierre + 15 Bois' },
-                2: { resources: { metal: 50, stone: 30 }, text: '50 Métal + 30 Pierre' }
+                1: { stone: 25, wood: 15 },
+                2: { metal: 50, stone: 30 }
             }
         };
 
-        return costs[tool]?.[currentTier] || { resources: {}, text: 'MAX' };
+        const resources = this.scaleCost(costs[tool]?.[currentTier], 'playerUpgrade') ?? {};
+        return {
+            resources,
+            text: Object.keys(resources).length > 0 ? this.formatCost(resources) : 'MAX'
+        };
     }
 
     /**
@@ -2167,12 +2677,16 @@ export class Game {
      */
     getBowUpgradeCost(currentTier) {
         const costs = {
-            1: { resources: { wood: 25, stone: 15 }, text: '25 Bois + 15 Pierre' },
-            2: { resources: { stone: 35, metal: 25 }, text: '35 Pierre + 25 Métal' },
-            3: { resources: { metal: 45, amethyst: 35 }, text: '45 Métal + 35 Améthyste' },
-            4: { resources: { metal: 70, amethyst: 50 }, text: '70 Métal + 50 Améthyste' }
+            1: { wood: 25, stone: 15 },
+            2: { stone: 35, metal: 25 },
+            3: { metal: 45, amethyst: 35 },
+            4: { metal: 70, amethyst: 50 }
         };
-        return costs[currentTier] || { resources: {}, text: 'MAX' };
+        const resources = this.scaleCost(costs[currentTier], 'playerUpgrade') ?? {};
+        return {
+            resources,
+            text: Object.keys(resources).length > 0 ? this.formatCost(resources) : 'MAX'
+        };
     }
 
     /**
@@ -2231,12 +2745,15 @@ export class Game {
      */
     getSwordUpgradeCost(currentTier) {
         const costs = {
-            1: { resources: { stone: 25, metal: 15 } },
-            2: { resources: { stone: 40, metal: 30 } },
-            3: { resources: { metal: 50, amethyst: 20 } },
-            4: { resources: { metal: 75, amethyst: 40 } }
+            1: { stone: 25, metal: 15 },
+            2: { stone: 40, metal: 30 },
+            3: { metal: 50, amethyst: 20 },
+            4: { metal: 75, amethyst: 40 }
         };
-        return costs[currentTier] || costs[1];
+        const baseCost = costs[currentTier] || costs[1];
+        return {
+            resources: this.scaleCost(baseCost, 'playerUpgrade')
+        };
     }
 
     /**

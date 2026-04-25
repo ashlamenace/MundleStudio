@@ -46,6 +46,7 @@ export class Projectile {
         // Bow special effects
         this.specialEffect = options.specialEffect || null;
         this.bowTier = options.bowTier || 1;
+        this.ownerId = options.ownerId || null;
 
         // Turret special abilities
         this.armorPierce = options.armorPierce || 0;
@@ -101,25 +102,53 @@ export class Projectile {
             return;
         }
 
-        // Check collisions with enemies
-        const enemies = this.game.getEnemies();
-        for (const enemy of enemies) {
-            if (Utils.circleCollision(this.x, this.y, this.size, enemy.x, enemy.y, enemy.collisionRadius)) {
-                // Use damage type system
-                enemy.takeDamage(this.damage, this.owner, this.damageType);
+        // Check collisions with enemies (skip for visual-only remote projectiles)
+        if (!this._visualOnly) {
+            const enemies = this.game.getEnemies();
+            for (const enemy of enemies) {
+                if (Utils.circleCollision(this.x, this.y, this.size, enemy.x, enemy.y, enemy.collisionRadius)) {
+                    // Use damage type system
+                    enemy.takeDamage(this.damage, this.owner, this.damageType);
 
-                // Apply bow special effects
-                if (this.specialEffect) {
-                    this.applySpecialEffect(enemy);
+                    // Apply bow special effects
+                    if (this.specialEffect) {
+                        this.applySpecialEffect(enemy);
+                    }
+
+                    // Apply turret special abilities
+                    this.applyTurretAbilities(enemy);
+
+                    if (!this.piercing) {
+                        this.destroyed = true;
+                        this.spawnHitEffect();
+                        return;
+                    }
                 }
 
-                // Apply turret special abilities
-                this.applyTurretAbilities(enemy);
+                if (this.game.gameMode === 'versus_ffa' && this.game.networkManager?.inRoom) {
+                    const ownerSlot = this.game.resolvePlayerSlot(this.ownerId ?? this.game.networkManager?.playerId ?? null);
+                    const remotePlayers = this.game.getHostileRemotePlayersFor(this.ownerId ?? this.game.networkManager?.playerId ?? null);
 
-                if (!this.piercing) {
-                    this.destroyed = true;
-                    this.spawnHitEffect();
-                    return;
+                    for (const remotePlayer of remotePlayers) {
+                        if (!remotePlayer || remotePlayer.destroyed) continue;
+                        if (!Utils.circleCollision(this.x, this.y, this.size, remotePlayer.x, remotePlayer.y, remotePlayer.collisionRadius || 16)) continue;
+
+                        this.game.networkManager?.sendVersusPlayerHit?.(remotePlayer.playerId, {
+                            damage: this.damage,
+                            damageType: this.damageType,
+                            slowFactor: this.slowEffect || 0,
+                            slowDuration: this.slowDuration || 0,
+                            targetSlot: this.game.resolvePlayerSlot(remotePlayer.playerId),
+                            targetId: remotePlayer.playerId,
+                            ownerSlot
+                        });
+
+                        if (!this.piercing) {
+                            this.destroyed = true;
+                            this.spawnHitEffect();
+                            return;
+                        }
+                    }
                 }
             }
         }

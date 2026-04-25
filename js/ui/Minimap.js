@@ -59,8 +59,8 @@ export class Minimap {
         // Draw enemies
         this.renderEnemies(ctx);
 
-        // Draw crystal
-        this.renderCrystal(ctx);
+        // Draw crystals
+        this.renderCrystals(ctx);
 
         // Draw player
         this.renderPlayer(ctx);
@@ -176,21 +176,26 @@ export class Minimap {
     /**
      * Render crystal on minimap
      */
-    renderCrystal(ctx) {
-        const crystal = this.game.crystal;
-        const pos = this.worldToMinimap(crystal.x, crystal.y);
+    renderCrystals(ctx) {
+        const crystals = this.game.getAllCrystals?.() ?? (this.game.crystal ? [this.game.crystal] : []);
 
-        ctx.fillStyle = '#9966ff';
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, 4, 0, Math.PI * 2);
-        ctx.fill();
+        for (const crystal of crystals) {
+            if (!crystal || crystal.destroyed) continue;
 
-        // Glow
-        ctx.strokeStyle = 'rgba(150, 100, 255, 0.5)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
-        ctx.stroke();
+            const pos = this.worldToMinimap(crystal.x, crystal.y);
+            const color = crystal._getLevelColor?.() ?? '#9966ff';
+
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, crystal.isLocalCrystal ? 4 : 3, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = crystal.isLocalCrystal ? 'rgba(255, 255, 255, 0.65)' : 'rgba(255, 255, 255, 0.35)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, crystal.isLocalCrystal ? 6 : 5, 0, Math.PI * 2);
+            ctx.stroke();
+        }
     }
 
     /**

@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const hostArea       = document.getElementById('lobby-host-area');
     const codeValue      = document.getElementById('lobby-code-value');
     const copyBtn        = document.getElementById('lobby-copy-btn');
+    const modeSelect     = document.getElementById('lobby-mode-select');
     const playerCount    = document.getElementById('lobby-player-count');
     const playersList    = document.getElementById('lobby-players-list');
     const startBtn       = document.getElementById('lobby-start-btn');
@@ -34,6 +35,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (serverUrlInput && !serverUrlInput.value.trim()) {
         serverUrlInput.value = DEFAULT_URL;
+    }
+    if (modeSelect?.value) {
+        game.setGameMode(modeSelect.value);
     }
 
     let remoteCount = 0; // tracks remote players for host UI
@@ -66,6 +70,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function hideLobby() {
         lobbyScreen.classList.add('hidden');
+    }
+
+    function getSelectedMode() {
+        return modeSelect?.value || game.gameMode;
     }
 
     async function connectToLobbyServer() {
@@ -119,13 +127,17 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => { copyBtn.textContent = '📋 Copier'; }, 1500);
     });
 
+    modeSelect?.addEventListener('change', () => {
+        game.setGameMode(getSelectedMode());
+    });
+
     // ── HOST: START GAME ──────────────────────────────────────────────────────
     startBtn.addEventListener('click', () => {
         if (!net.isHost) return;
         hideLobby();
         // Broadcast start to all connected clients
         // startGame() generates _worldSeed; broadcastStart() includes it in GAME_START
-        game.startGame();
+        game.startGame({ gameMode: getSelectedMode() });
         net.broadcastStart();
     });
 
@@ -170,6 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
     soloBtn.addEventListener('click', () => {
         net.disconnect();
         game.networkManager = null;
+        game.setGameMode(getSelectedMode());
         hideLobby();
         game.gameOverScreen?.classList.add('hidden');
         game.startScreen?.classList.remove('hidden');

@@ -141,9 +141,10 @@ export class BuildMenu {
         const crystalSys = this.game.crystalUpgradeSystem;
         const requiredLevel = config.crystalLevel ?? 0;
         const isCrystalLocked = crystalSys ? !crystalSys.isBuildingUnlocked(key) : false;
+        const scaledCost = this.game.scaleCost(config.cost, 'building');
 
         // Resource affordability (only matters if crystal-unlocked)
-        const canAfford = !isCrystalLocked && this.game.resourceSystem.hasResources(config.cost);
+        const canAfford = !isCrystalLocked && this.game.resourceSystem.hasResources(scaledCost);
 
         if (isCrystalLocked) {
             element.classList.add('crystal-locked');
@@ -167,17 +168,17 @@ export class BuildMenu {
         const costEl = document.createElement('div');
         costEl.className = 'build-item-cost';
         if (isCrystalLocked) {
-            const levelName = CRYSTAL_LEVELS[requiredLevel]?.name ?? `Niveau ${requiredLevel}`;
+            const levelName = CRYSTAL_LEVELS[requiredLevel]?.name ?? `Niveau ${requiredLevel + 1}`;
             costEl.innerHTML = `<span style="color:#bb88ff;font-size:10px">✨ ${levelName}</span>`;
         } else {
-            costEl.innerHTML = this.formatCost(config.cost);
+            costEl.innerHTML = this.formatCost(scaledCost);
         }
         element.appendChild(costEl);
 
         // Click handler
         element.addEventListener('click', () => {
             if (isCrystalLocked) return;
-            const canAffordNow = this.game.resourceSystem.hasResources(config.cost);
+            const canAffordNow = this.game.resourceSystem.hasResources(scaledCost);
             if (canAffordNow) {
                 document.querySelectorAll('.build-item').forEach(item => {
                     item.classList.remove('selected');

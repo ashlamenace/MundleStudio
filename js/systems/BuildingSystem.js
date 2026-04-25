@@ -238,7 +238,7 @@ export const BuildingConfigs = {
         name: 'Établi',
         type: 'workbench',
         tier: 1,
-        crystalLevel: 2,
+        crystalLevel: 1,
         icon: '🔨',
         health: 300,
         cost: { wood: 40, stone: 25 },
@@ -600,7 +600,7 @@ export class Building {
         if (this.level >= this.maxLevel) return false;
 
         const nextLevel = this.level + 1;
-        const cost = this.upgradeCosts[nextLevel];
+        const cost = this.getUpgradeCost(nextLevel);
 
         if (!cost || !this.game.resourceSystem.spendResources(cost)) {
             return false;
@@ -683,6 +683,11 @@ export class Building {
             this.healRate = this.baseHealRate * (1 + 0.6 * (level - 1));
             this.healRange = this.baseHealRange * (1 + 0.3 * (level - 1));
         }
+    }
+
+    getUpgradeCost(level = this.level + 1) {
+        const baseCost = this.upgradeCosts[level];
+        return this.game.scaleCost(baseCost, 'buildingUpgrade');
     }
 
     /**
@@ -1081,6 +1086,18 @@ export class Building {
     }
 
     /**
+     * Multiplayer authority for turrets.
+     * In versus, only the owner simulates targeting/firing for that building.
+     */
+    isTurretAuthority() {
+        const network = this.game.networkManager;
+        if (!network?.inRoom) return true;
+
+        if (this.ownerId) return this.ownerId === network.playerId;
+        return network.isHost === true;
+    }
+
+    /**
      * Show production particle
      */
     showProductionParticle() {
@@ -1129,6 +1146,8 @@ export class Building {
      * Turret AI
      */
     updateTurret(deltaTime) {
+        if (!this.isTurretAuthority()) return;
+
         // Cooldown
         if (this.fireCooldown > 0) {
             this.fireCooldown -= deltaTime;
@@ -1158,19 +1177,29 @@ export class Building {
      * Find nearest enemy in range
      */
     findTarget() {
-        const enemies = this.game.getEnemies();
-        let closest = null;
-        let closestDist = this.range;
+        const candidates = [];
+        const ownerId = this.ownerId ?? this.game.networkManager?.playerId ?? null;
 
-        for (const enemy of enemies) {
+        for (const enemy of this.game.getEnemies()) {
             const dist = Utils.distance(this.x, this.y, enemy.x, enemy.y);
-            if (dist < closestDist) {
-                closest = enemy;
-                closestDist = dist;
+            if (dist <= this.range) {
+                candidates.push({ target: enemy, dist, priority: 1 });
             }
         }
 
-        return closest;
+        if (this.game.gameMode === 'versus_ffa' && this.game.networkManager?.inRoom) {
+            for (const remotePlayer of this.game.getHostileRemotePlayersFor(ownerId)) {
+                const dist = Utils.distance(this.x, this.y, remotePlayer.x, remotePlayer.y);
+                if (dist <= this.range) {
+                    candidates.push({ target: remotePlayer, dist, priority: 0 });
+                }
+            }
+        }
+
+        if (candidates.length === 0) return null;
+
+        candidates.sort((a, b) => a.priority - b.priority || a.dist - b.dist);
+        return candidates[0].target;
     }
 
     /**
@@ -1264,6 +1293,7 @@ export class Building {
                     damage: finalDamage,
                     range: this.range + 50,
                     owner: this,
+                    ownerId: this.ownerId ?? this.game.networkManager?.playerId ?? null,
                     type: this.projectileType,
                     color: isCrit ? '#ffff00' : projectileColor,
                     damageType: damageType,
@@ -1524,7 +1554,7 @@ export class Building {
             const dist = Utils.distance(this.x, this.y, player.x, player.y);
             if (dist < 120) {
                 const nextLevel = this.level + 1;
-                const cost = this.upgradeCosts[nextLevel];
+                const cost = this.getUpgradeCost(nextLevel);
                 if (cost) {
                     const canAfford = this.game.resourceSystem.hasResources(cost);
                     const pulse = 0.55 + Math.sin(Date.now() / 220) * 0.25;
@@ -3182,7 +3212,7 @@ export class BuildingSystem {
             const req = upSys.getRequiredLevel(buildingKey);
             this.game.showNotification(
                 'Bâtiment verrouillé',
-                `Améliore le cristal au niveau ${req} pour débloquer ce bâtiment.`,
+                `Améliore le cristal au niveau ${req + 1} pour débloquer ce bâtiment.`,
                 '#bb88ff', 2
             );
             return;
@@ -3265,16 +3295,21 @@ export class BuildingSystem {
         if (!this.selectedBuilding) return false;
 
         const config = BuildingConfigs[this.selectedBuilding];
+        const cost = this.game.scaleCost(config?.cost, 'building');
         if (!config) return false;
 
         // Check resources
-        if (!this.game.resourceSystem.hasResources(config.cost)) {
+        if (!this.game.resourceSystem.hasResources(cost)) {
             return false;
         }
 
         // Check distance from player
         const player = this.game.player;
         if (Utils.distance(x, y, player.x, player.y) > 200) {
+            return false;
+        }
+
+        if (!this.game.canPlayerBuildAt(x, y)) {
             return false;
         }
 
@@ -3311,9 +3346,10 @@ export class BuildingSystem {
         }
 
         const config = BuildingConfigs[this.selectedBuilding];
+        const cost = this.game.scaleCost(config?.cost, 'building');
 
         // Spend resources
-        if (!this.game.resourceSystem.spendResources(config.cost)) {
+        if (!this.game.resourceSystem.spendResources(cost)) {
             return false;
         }
 
@@ -3342,9 +3378,11 @@ export class BuildingSystem {
     receiveNetworkBuilding(data) {
         // Prevent duplicate (rare race condition)
         if (this.buildings.some(b => b._netId === data.bId)) return;
+        const ownerId = data.ownerId ?? data._from ?? null;
+        if (!this.game.canPlayerBuildAt(data.x, data.y, ownerId)) return;
         const building = new Building(this.game, data.x, data.y, data.bType);
         building._netId = data.bId;
-        building.ownerId = data.ownerId ?? data._from ?? null;
+        building.ownerId = ownerId;
         this.buildings.push(building);
         this.spawnPlacementEffect(data.x, data.y);
     }

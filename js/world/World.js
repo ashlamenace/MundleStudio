@@ -5,6 +5,7 @@
 
 import { Utils } from '../core/Utils.js';
 import { ResourceNode } from '../entities/ResourceNode.js';
+import { buildVersusArena } from './VersusArena.js';
 
 // Tile types
 export const TileType = {
@@ -75,10 +76,11 @@ const BiomeConfig = {
 };
 
 export class World {
-    constructor(game, width, height) {
+    constructor(game, width, height, options = {}) {
         this.game = game;
         this.width = width;
         this.height = height;
+        this.mode = options.mode ?? 'coop';
         this.tileSize = 32;
         this.tilesX = Math.ceil(width / this.tileSize);
         this.tilesY = Math.ceil(height / this.tileSize);
@@ -96,6 +98,8 @@ export class World {
         // Structured map points
         this.landmarks = [];
         this.pathSegments = [];
+        this.arenaData = null;
+        this.supportsCaves = true;
 
         // OPTIMIZATION: Pre-computed tile colors (cache)
         this.tileColors = [];
@@ -135,6 +139,11 @@ export class World {
      * Generate the world procedurally with radial biomes
      */
     generate() {
+        if (this.mode === 'versus_ffa') {
+            buildVersusArena(this, { BiomeType, TileType });
+            return;
+        }
+
         const centerX = this.tilesX / 2;
         const centerY = this.tilesY / 2;
         const maxDist = Math.sqrt(centerX * centerX + centerY * centerY);
@@ -738,6 +747,58 @@ export class World {
         if (barrier) return false;
 
         return true;
+    }
+
+    getSpawnPointForSlot(slot) {
+        return this.arenaData?.slots?.[slot]?.spawn ?? null;
+    }
+
+    getCrystalPointForSlot(slot) {
+        return this.arenaData?.slots?.[slot]?.crystal ?? null;
+    }
+
+    getIslandById(id) {
+        if (!id) return null;
+        return this.arenaData?.islands?.find(island => island.id === id) ?? null;
+    }
+
+    getIslandForSlot(slot) {
+        const islandId = this.arenaData?.slots?.[slot]?.islandId;
+        return this.getIslandById(islandId);
+    }
+
+    getIslandAt(worldX, worldY) {
+        if (!this.arenaData?.islands?.length) return null;
+
+        return this.arenaData.islands.find(island => this.isPointInsideIslandZone(island?.shape ?? island, worldX, worldY)) ?? null;
+    }
+
+    canBuildAtForSlot(slot, worldX, worldY) {
+        if (!this.arenaData || !slot) return true;
+
+        const island = this.getIslandAt(worldX, worldY);
+        if (!island || island.type !== 'player' || island.slot !== slot) {
+            return false;
+        }
+
+        return this.isPointInsideIslandZone(island.buildZone, worldX, worldY);
+    }
+
+    isPointInsideIslandZone(zone, worldX, worldY) {
+        if (!zone) return false;
+
+        if (zone.type === 'ellipse') {
+            const radiusX = Math.max(1, zone.radiusX ?? 1);
+            const radiusY = Math.max(1, zone.radiusY ?? 1);
+            const dx = (worldX - zone.centerX) / radiusX;
+            const dy = (worldY - zone.centerY) / radiusY;
+            return (dx * dx) + (dy * dy) <= 1;
+        }
+
+        return worldX >= zone.left &&
+            worldX < zone.right &&
+            worldY >= zone.top &&
+            worldY < zone.bottom;
     }
 
     /**

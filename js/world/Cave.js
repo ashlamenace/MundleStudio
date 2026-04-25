@@ -276,6 +276,9 @@ export class Cave {
      * Place enemies
      */
     placeEnemies() {
+        // In multiplayer, clients receive cave enemies via ENEMY_SPAWN from the host
+        if (this.game.networkManager?.inRoom && !this.game.networkManager?.isHost) return;
+
         const enemyCount = 5 + this.difficulty * 3;
 
         for (let i = 0; i < enemyCount; i++) {
@@ -338,6 +341,8 @@ export class Cave {
      * Place boss enemy
      */
     placeBoss() {
+        if (this.game.networkManager?.inRoom && !this.game.networkManager?.isHost) return;
+
         // Boss near exit
         const pos = { x: this.exitX + 100, y: this.exitY };
         const config = CaveEnemyTypes.crystalGuardian;

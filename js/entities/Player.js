@@ -10,11 +10,10 @@ import { spriteManager } from '../core/SpriteManager.js';
 export class Player extends Entity {
     constructor(game, x, y) {
         super(game, x, y);
-
         this.type = 'player';
-        this.width = 28;
-        this.height = 28;
-        this.collisionRadius = 14;
+        this.width = 38;
+        this.height = 38;
+        this.collisionRadius = 16;
 
         // Health
         this.maxHealth = 120;  // Increased from 100 for better early game
@@ -33,6 +32,7 @@ export class Player extends Entity {
 
         // Animation
         this.facingAngle = 0;
+        this.spriteFacingAngle = Math.PI / 2;
         this.isAttacking = false;
         this.attackAnimation = 0;
 
@@ -80,11 +80,13 @@ export class Player extends Entity {
 
         // Bow sprites
         this.bowSprites = {};
+        this.bowIdleSprite = new Image();
+        this.bowIdleSprite.src = 'assets/sprites/weapons/bow_idle.png';
         this.loadBowSprites();
 
-        // Sword sprite (GIF displays first frame as static image)
+        // Sword sprite
         this.swordSprite = new Image();
-        this.swordSprite.src = 'assets/sprites/weapons/sword_cut.gif';
+        this.swordSprite.src = 'assets/sprites/weapons/sword_idle.png';
 
         this.hammerSprite = new Image();
         this.hammerSprite.src = 'assets/Tiny Swords (Free Pack)/Tiny Swords (Free Pack)/Terrain/Resources/Tools/Tool_01.png';
@@ -212,6 +214,10 @@ export class Player extends Entity {
     }
 
     getBowSprite() {
+        if (this.bowIdleSprite?.complete && this.bowIdleSprite.naturalWidth > 0) {
+            return this.bowIdleSprite;
+        }
+
         const tier = this.bowTier;
 
         if (tier <= 3) {
@@ -254,6 +260,10 @@ export class Player extends Entity {
         this.speed = this.baseSpeed * this.speedMultiplier * enemySlowMul * (1 + rallySpeedBonus);
         this.vx = movement.x * this.speed;
         this.vy = movement.y * this.speed;
+
+        if (movement.x !== 0 || movement.y !== 0) {
+            this.spriteFacingAngle = Math.atan2(movement.y, movement.x);
+        }
 
         // Store old position for collision
         const oldX = this.x;
@@ -530,8 +540,75 @@ export class Player extends Entity {
             this.game.audioSystem?.playHit?.(tool.specialEffect || 'physical');
         }
 
-        // Check for buildings to destroy (only in overworld)
-        if (!this.game.inCave && this.game.buildingSystem) {
+        // versus: hit hostile players and enemy-owned structures through the shared network damage flow
+        if (!this.game.inCave && this.game.gameMode === 'versus_ffa' && this.game.networkManager?.inRoom) {
+            const ownerId = this.game.networkManager.playerId ?? null;
+            const ownerSlot = this.game.resolvePlayerSlot(ownerId);
+            const structureDamage = tool.damage * 2 * this.damageMultiplier * (1 + (this._rallyDamageBonus || 0));
+
+            let bestRemotePlayer = null;
+            let bestRemotePlayerDist = Infinity;
+            for (const remotePlayer of this.game.getHostileRemotePlayersFor(ownerId)) {
+                const dist = Utils.distance(this.x, this.y, remotePlayer.x, remotePlayer.y);
+                if (dist >= tool.range + (remotePlayer.collisionRadius || 16)) continue;
+                const angleToRemote = Utils.angle(this.x, this.y, remotePlayer.x, remotePlayer.y);
+                const angleDiff = Math.abs(Utils.normalizeAngle(angleToRemote) - Utils.normalizeAngle(this.facingAngle));
+                if (angleDiff >= Math.PI / 4 && angleDiff <= Math.PI * 7 / 4) continue;
+                if (dist < bestRemotePlayerDist) {
+                    bestRemotePlayer = remotePlayer;
+                    bestRemotePlayerDist = dist;
+                }
+            }
+
+            if (bestRemotePlayer) {
+                this.game.networkManager?.sendVersusPlayerHit(bestRemotePlayer.playerId, {
+                    damage: baseDamage,
+                    damageType: tool.specialEffect || 'physical',
+                    slowFactor: tool.specialEffect === 'ice' ? (tool.tier >= 5 ? 0.5 : 0.4) : 0,
+                    slowDuration: tool.specialEffect === 'ice' ? (tool.tier >= 5 ? 2500 : 2000) : 0,
+                    targetSlot: this.game.resolvePlayerSlot(bestRemotePlayer.playerId)
+                });
+            }
+
+            const crystals = this.game.getAllCrystals?.() ?? [];
+            for (const crystal of crystals) {
+                if (!crystal || crystal.destroyed || crystal.ownerSlot === ownerSlot) continue;
+                const dist = Utils.distance(this.x, this.y, crystal.x, crystal.y);
+                if (dist >= tool.range + crystal.collisionRadius) continue;
+                const angleToCrystal = Utils.angle(this.x, this.y, crystal.x, crystal.y);
+                const angleDiff = Math.abs(Utils.normalizeAngle(angleToCrystal) - Utils.normalizeAngle(this.facingAngle));
+                if (angleDiff < Math.PI / 4 || angleDiff > Math.PI * 7 / 4) {
+                    this.game.networkManager?.sendVersusStructureHit({
+                        targetType: 'crystal',
+                        slot: crystal.ownerSlot,
+                        damage: structureDamage
+                    });
+                    break;
+                }
+            }
+
+            const buildings = this.game.buildingSystem.buildings;
+            for (const building of buildings) {
+                if (!building?.solid || building.destroyed) continue;
+                const buildingOwnerSlot = this.game.resolvePlayerSlot(building.ownerId);
+                if (!buildingOwnerSlot || buildingOwnerSlot === ownerSlot) continue;
+
+                const dist = Utils.distance(this.x, this.y, building.x, building.y);
+                if (dist < tool.range + building.collisionRadius) {
+                    const angleToBuilding = Utils.angle(this.x, this.y, building.x, building.y);
+                    const angleDiff = Math.abs(Utils.normalizeAngle(angleToBuilding) - Utils.normalizeAngle(this.facingAngle));
+
+                    if (angleDiff < Math.PI / 4 || angleDiff > Math.PI * 7 / 4) {
+                        this.game.networkManager?.sendVersusStructureHit({
+                            targetType: 'building',
+                            bId: building._netId,
+                            damage: structureDamage
+                        });
+                        break;
+                    }
+                }
+            }
+        } else if (!this.game.inCave && this.game.buildingSystem) {
             const buildings = this.game.buildingSystem.buildings;
             for (const building of buildings) {
                 const dist = Utils.distance(this.x, this.y, building.x, building.y);
@@ -798,6 +875,7 @@ export class Player extends Entity {
             damage: damage * this.damageMultiplier * (1 + (this._rallyDamageBonus || 0)),
             range: tool.range,
             owner: this,
+            ownerId: this.game.networkManager?.playerId ?? null,
             specialEffect: tool.specialEffect,
             bowTier: tool.tier || 1,
             color: arrowColor,
@@ -973,7 +1051,7 @@ export class Player extends Entity {
     }
 
     die() {
-        this.game.gameOver();
+        this.game.handleLocalPlayerDeath(this);
     }
 
     render(ctx) {
@@ -988,20 +1066,28 @@ export class Player extends Entity {
         // Ground shadow
         ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
         ctx.beginPath();
-        ctx.ellipse(0, 18, 14, 5, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, 18, 15, 6, 0, 0, Math.PI * 2);
         ctx.fill();
 
         // Sprite animation
         const tool = this.tools[this.selectedSlot];
         const animKey = this._getAnimKey(tool, this._animState || 'idle');
-        const DRAW = 72; // render size: 192px frame scaled to 72px
-        const drawnSprite = spriteManager.drawUnitFrame(
-            ctx, animKey, this._animFrame || 0, DRAW, DRAW, this._facingLeft
+        const DRAW = 64;
+        const STATIC_DRAW = 38;
+        const bodyFlip = Math.cos(this.spriteFacingAngle || 0) < 0;
+        const drawnSprite = spriteManager.drawStaticPlayerFrame(ctx, STATIC_DRAW, bodyFlip) || spriteManager.drawDirectionalPlayerFrame(
+            ctx,
+            this._animState || 'idle',
+            this._animFrame || 0,
+            this.spriteFacingAngle || 0,
+            DRAW
+        ) || spriteManager.drawUnitFrame(
+            ctx, animKey, this._animFrame || 0, DRAW, DRAW, bodyFlip
         );
 
         if (!drawnSprite) {
             spriteManager.drawPlayerFallbackFrame(
-                ctx, this._animFrame || 0, 52, 52, this._facingLeft
+                ctx, this._animFrame || 0, 64, 64, bodyFlip
             );
         }
 
@@ -1058,9 +1144,9 @@ export class Player extends Entity {
 
         const isLeft = this._facingLeft;
         const handX = isLeft ? -10 : 10;
-        const handY = this._animState === 'attack' ? 0 : 3;
+        const handY = this._animState === 'attack' ? 2 : 5;
         const attackSwing = this._animState === 'attack'
-            ? Math.sin(Math.min(1, this.attackCooldown / Math.max(0.1, tool?.speed || 0.3)) * Math.PI) * 0.55
+            ? Math.sin(Math.min(1, this.attackCooldown / Math.max(0.1, tool?.speed || 0.3)) * Math.PI) * 0.8
             : 0;
 
         let drawW = 16;
@@ -1070,15 +1156,15 @@ export class Player extends Entity {
         let rotation = this.facingAngle + attackSwing;
 
         if (tool?.type === 'melee') {
-            drawW = 20;
-            drawH = 22;
+            drawW = 23;
+            drawH = 27;
             offsetX = 5;
             offsetY = -5;
         } else if (tool?.type === 'ranged') {
-            drawW = 20;
-            drawH = 20;
+            drawW = 30;
+            drawH = 30;
             offsetX = 5;
-            offsetY = -2;
+            offsetY = 1;
         } else if (tool?.toolType === 'axe' || tool?.toolType === 'pickaxe') {
             drawW = 18;
             drawH = 18;

@@ -131,9 +131,21 @@ class Room {
 
 const wss = new WebSocket.Server({ noServer: true });
 
+// Heartbeat: terminate zombie connections after two missed pings (60 s)
+const heartbeatInterval = setInterval(() => {
+    for (const ws of wss.clients) {
+        if (!ws._alive) { ws.terminate(); continue; }
+        ws._alive = false;
+        ws.ping();
+    }
+}, 30_000);
+wss.on('close', () => clearInterval(heartbeatInterval));
+
 wss.on('connection', (ws) => {
-    ws._room = null;
-    ws._id   = null;
+    ws._room  = null;
+    ws._id    = null;
+    ws._alive = true;
+    ws.on('pong', () => { ws._alive = true; });
 
     ws.on('message', (raw) => {
         let msg;
@@ -204,6 +216,19 @@ wss.on('connection', (ws) => {
             case 'RELAY_TO_HOST': {
                 if (!ws._room) return;
                 ws._room.send(ws._room.host, { ...msg.data, _from: ws._id });
+                break;
+            }
+
+            // Forward to a specific player by ID (e.g. late-join state sync)
+            case 'RELAY_TO': {
+                if (!ws._room) return;
+                const targetId = String(msg.target ?? '');
+                for (const [memberWs, info] of ws._room.members) {
+                    if (info.id === targetId) {
+                        ws._room.send(memberWs, { ...msg.data, _from: ws._id });
+                        break;
+                    }
+                }
                 break;
             }
         }

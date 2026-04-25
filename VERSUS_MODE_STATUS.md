@@ -1,0 +1,112 @@
+# Mode Versus FFA - Etat d'avancement
+
+## Objectif
+
+Ajouter un second mode multijoueur `1v1v1v1` en gardant le mode coop intact et retro-compatible.
+
+Le principe cible est :
+- une arene en grille `3x3`
+- une ile de base par joueur
+- des iles neutres contestees
+- un cristal a defendre par joueur present
+- des vagues de nuit sur chaque base vivante
+- deplacement entre iles par ponts
+- PvP et destruction de batiments ennemis
+
+## Ce qui est deja implemente
+
+### Architecture de mode de jeu
+
+- ajout d'une config de mode de jeu centralisee
+- support de `coop` et `versus_ffa`
+- transmission du mode dans le demarrage reseau
+- conservation du comportement historique du coop
+
+### Initialisation et carte versus
+
+- generation d'une arene dediee au versus
+- monde versus plus grand que la map coop
+- grille `3x3` avec :
+  - iles joueurs `north/east/south/west`
+  - iles neutres dans les coins
+  - ile centrale verrouillee
+- iles plus grandes, avec forme elliptique et bords arrondis
+- ponts de liaison entre iles adjacentes
+- desactivation des caves sur cette map
+
+### Spawn, cristaux et presentation
+
+- assignation d'un slot joueur via `player_1..player_4`
+- spawn du joueur sur son ile
+- cristal place au centre de l'ile
+- creation des cristaux seulement pour les slots reellement occupes au lancement
+- affichage de plusieurs cristaux sur la minimap
+- shake camera uniquement pour le cristal local
+
+### Gameplay de base versus
+
+- restriction de construction a l'ile du joueur uniquement
+- la validation est faite cote local et cote reseau
+- support de plusieurs cristaux dans `Game`
+- etat de destruction d'un cristal deja gere
+- lanes de vagues par slot deja en place
+- spawn des ennemis sur le contour de l'ile cible en versus
+- elimination d'un joueur quand son cristal est detruit
+- victoire quand un seul cristal reste vivant
+- respawn sur le cristal avec perte de ressources
+- PvP fonctionnel et degats sur les batiments ennemis
+- defense autoritative cote proprietaire pour garder la synchro reseau
+- metadata de projectile propagee pour resoudre les hits cote reseau
+
+### Economie / ressources
+
+- ressources de depart sur les iles joueurs
+- ressources neutres massivement augmentees sur les iles intermediaires
+- generation aleatoire massive des ressources en versus (objectif ~10x vs version precedente)
+- generation uniforme des ressources sur la surface des iles (suppression du placement en anneaux)
+- repartition orientee edge islands : densite forte sur iles neutres de bord, plus faible sur iles principales joueurs
+- profil d'economie specifique au versus pour garder une progression de type solo / FFA :
+  - cristal moins cher
+  - constructions moins cheres
+  - upgrades de batiments moins chers
+  - upgrades joueur moins chers
+- correction de progression : le palier cristal 2 (niveau joueur) debloque bien l'etabli
+
+## Ce qui reste a faire
+
+### Vagues et IA
+
+- verifier qu'une vague complete existe bien par ile encore vivante sur host et clients
+- affiner la cible des ennemis pour les matchs a plusieurs fronts
+- equilibrer les points de spawn pour eviter les apparitions trop proches des ponts
+
+### Reseau / etat de partie
+
+- synchroniser explicitement les joueurs elimines
+- gerer proprement les cas de reconnexion ou resync tardif
+- assurer que tous les clients ont exactement la meme liste de cristaux actifs
+
+### Interface
+
+- afficher clairement les joueurs encore en vie
+- afficher l'etat de chaque cristal en versus
+- ajouter un vrai ecran de victoire / elimination propre au mode
+
+### Equilibrage
+
+- ajuster la quantite exacte de ressources sur iles joueurs et neutres
+- verifier en partie reelle qu'il n'existe aucun blocage mathematique sur le metal / amethyste
+- regler la distance cristal-pont et la pression des vagues
+- tester les formats `1v1`, `1v1v1` et `1v1v1v1`
+
+## Limites connues
+
+- la boucle de partie principale est en place, mais la synchronisation en vraie session multi doit encore etre testee en conditions reelles
+- les cristaux actifs sont calcules a partir des joueurs presents au lancement ; la gestion complete d'un depart en cours de partie reste a finaliser
+- l'equilibrage fin de la perte de ressources, des turrets et du tempo de victoire reste a ajuster apres playtests
+
+## Prochaine etape recommandee
+
+1. faire un vrai pass de tests reseau a `2/3/4` joueurs
+2. ajuster le penalty de mort et le tempo des vagues
+3. documenter les derniers points de limite pour le versus

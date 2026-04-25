@@ -14,6 +14,21 @@ class SpriteManager {
         // Kenney tiny-dungeon packed tilemap: 12 cols × 11 rows of 16×16
         this.DUNGEON_TILE = 16;
 
+        this.directionalPlayer = {
+            key: 'player_phantom',
+            columns: 4,
+            rows: 4,
+            southRow: 0,
+            northRow: 1,
+            eastRow: 2,
+            backgroundThreshold: 245,
+            analysis: null
+        };
+
+        this.staticPlayer = {
+            key: 'phantom_idle'
+        };
+
         // Animation frame counts for player
         this.playerAnims = {
             warrior_idle:   { key: 'warrior_idle',    frames: 8 },
@@ -95,6 +110,8 @@ class SpriteManager {
             ['pawn_hammer_run',    `${ts}/Units/Blue Units/Pawn/Pawn_Run Hammer.png`],
             ['pawn_hammer_work',   `${ts}/Units/Blue Units/Pawn/Pawn_Interact Hammer.png`],
             ['player_guardian_sheet', 'assets/sprites/player/player_guardian_sheet.png'],
+            ['player_phantom', 'assets/sprites/player/player_phantom.png'],
+            ['phantom_idle', 'assets/sprites/player/phantom_idle.png'],
 
             // ── Enemy sprites ──────────────────────────────────────────────────
             // Red Pawn  → grunt, poisonFrog
@@ -240,6 +257,243 @@ class SpriteManager {
         ctx.save();
         if (flipX) ctx.scale(-1, 1);
         ctx.drawImage(img, sx, 0, fw, fh, -drawW / 2, -drawH / 2, drawW, drawH);
+        ctx.restore();
+        return true;
+    }
+
+    drawStaticPlayerFrame(ctx, drawSize, flipX = false) {
+        const img = this.sprites[this.staticPlayer.key];
+        if (!img) return false;
+
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        if (flipX) ctx.scale(-1, 1);
+        ctx.drawImage(img, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
+        ctx.restore();
+        return true;
+    }
+
+    _analyzeDirectionalPlayerSheet() {
+        const def = this.directionalPlayer;
+        if (def.analysis) return def.analysis;
+
+        const img = this.sprites[def.key];
+        if (!img) return null;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        const cctx = canvas.getContext('2d', { willReadFrequently: true });
+        cctx.drawImage(img, 0, 0);
+
+        const imageData = cctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        const bg = def.backgroundThreshold ?? 245;
+
+        for (let i = 0; i < data.length; i += 4) {
+            if (data[i] >= bg && data[i + 1] >= bg && data[i + 2] >= bg) {
+                data[i + 3] = 0;
+            }
+        }
+        cctx.putImageData(imageData, 0, 0);
+
+        const alpha = imageData.data;
+        const colCounts = new Array(canvas.width).fill(0);
+        const rowCounts = new Array(canvas.height).fill(0);
+
+        for (let y = 0; y < canvas.height; y++) {
+            const rowOffset = y * canvas.width * 4;
+            for (let x = 0; x < canvas.width; x++) {
+                if (alpha[rowOffset + x * 4 + 3] > 0) {
+                    colCounts[x]++;
+                    rowCounts[y]++;
+                }
+            }
+        }
+
+        const colBands = this._detectAxisBands(colCounts, def.columns);
+        const rowBands = this._detectAxisBands(rowCounts, def.rows);
+        const colCells = this._bandsToCellBounds(colBands, canvas.width);
+        const rowCells = this._bandsToCellBounds(rowBands, canvas.height);
+
+        let maxW = 1;
+        let maxH = 1;
+        const boxes = [];
+
+        for (let row = 0; row < def.rows; row++) {
+            boxes[row] = [];
+            const cellY = rowCells[row] || { start: Math.floor((row * canvas.height) / def.rows), end: Math.floor(((row + 1) * canvas.height) / def.rows) - 1 };
+            for (let col = 0; col < def.columns; col++) {
+                const cellX = colCells[col] || { start: Math.floor((col * canvas.width) / def.columns), end: Math.floor(((col + 1) * canvas.width) / def.columns) - 1 };
+                const bbox = this._findOpaqueBounds(alpha, canvas.width, canvas.height, cellX.start, cellY.start, cellX.end, cellY.end)
+                    || { left: cellX.start, top: cellY.start, right: cellX.end, bottom: cellY.end };
+                const width = Math.max(1, bbox.right - bbox.left + 1);
+                const height = Math.max(1, bbox.bottom - bbox.top + 1);
+                maxW = Math.max(maxW, width);
+                maxH = Math.max(maxH, height);
+                boxes[row][col] = { ...bbox, width, height };
+            }
+        }
+
+        def.analysis = { canvas, boxes, maxW, maxH };
+        return def.analysis;
+    }
+
+    _detectAxisBands(counts, expected) {
+        const max = counts.reduce((best, value) => Math.max(best, value), 0);
+        if (max <= 0) return this._fallbackAxisBands(counts.length, expected);
+
+        const thresholds = [0.12, 0.08, 0.05, 0.03, 0.015];
+        for (const ratio of thresholds) {
+            const threshold = Math.max(1, Math.floor(max * ratio));
+            let bands = this._segmentsAboveThreshold(counts, threshold).filter(b => (b.end - b.start + 1) >= 4);
+            if (bands.length === 0) continue;
+            if (bands.length > expected) bands = this._mergeBandsToExpected(bands, expected);
+            if (bands.length === expected) return bands;
+        }
+
+        return this._fallbackAxisBands(counts.length, expected);
+    }
+
+    _segmentsAboveThreshold(counts, threshold) {
+        const segments = [];
+        let start = -1;
+
+        for (let i = 0; i < counts.length; i++) {
+            if (counts[i] >= threshold) {
+                if (start < 0) start = i;
+            } else if (start >= 0) {
+                segments.push({ start, end: i - 1 });
+                start = -1;
+            }
+        }
+        if (start >= 0) segments.push({ start, end: counts.length - 1 });
+
+        return segments;
+    }
+
+    _mergeBandsToExpected(bands, expected) {
+        const merged = [...bands];
+        while (merged.length > expected) {
+            let bestIdx = 0;
+            let bestGap = Infinity;
+            for (let i = 0; i < merged.length - 1; i++) {
+                const gap = merged[i + 1].start - merged[i].end;
+                if (gap < bestGap) {
+                    bestGap = gap;
+                    bestIdx = i;
+                }
+            }
+            merged.splice(bestIdx, 2, {
+                start: merged[bestIdx].start,
+                end: merged[bestIdx + 1].end
+            });
+        }
+        return merged;
+    }
+
+    _fallbackAxisBands(total, expected) {
+        const bands = [];
+        for (let i = 0; i < expected; i++) {
+            const start = Math.floor((i * total) / expected);
+            const end = Math.max(start, Math.floor(((i + 1) * total) / expected) - 1);
+            bands.push({ start, end });
+        }
+        return bands;
+    }
+
+    _bandsToCellBounds(bands, total) {
+        if (!bands.length) return [];
+
+        const centers = bands.map(b => (b.start + b.end) / 2);
+        const cuts = [0];
+
+        for (let i = 0; i < centers.length - 1; i++) {
+            cuts.push(Math.round((centers[i] + centers[i + 1]) / 2));
+        }
+        cuts.push(total);
+
+        const cells = [];
+        for (let i = 0; i < bands.length; i++) {
+            cells.push({
+                start: Math.max(0, cuts[i]),
+                end: Math.min(total - 1, Math.max(cuts[i], cuts[i + 1] - 1))
+            });
+        }
+        return cells;
+    }
+
+    _findOpaqueBounds(alpha, width, height, left, top, right, bottom) {
+        let minX = right + 1;
+        let minY = bottom + 1;
+        let maxX = left - 1;
+        let maxY = top - 1;
+
+        for (let y = Math.max(0, top); y <= Math.min(height - 1, bottom); y++) {
+            const rowOffset = y * width * 4;
+            for (let x = Math.max(0, left); x <= Math.min(width - 1, right); x++) {
+                if (alpha[rowOffset + x * 4 + 3] > 0) {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+
+        if (maxX < minX || maxY < minY) return null;
+        return { left: minX, top: minY, right: maxX, bottom: maxY };
+    }
+
+    drawDirectionalPlayerFrame(ctx, state, frame, facingAngle, drawSize) {
+        const def = this.directionalPlayer;
+        const analysis = this._analyzeDirectionalPlayerSheet();
+        if (!analysis) return false;
+
+        const cols = Math.max(1, def.columns || 4);
+        const rows = Math.max(1, def.rows || 4);
+
+        const normalized = Math.atan2(Math.sin(facingAngle || 0), Math.cos(facingAngle || 0));
+
+        let row = def.southRow;
+        let flipX = false;
+
+        if (normalized > Math.PI / 4 && normalized < (3 * Math.PI) / 4) {
+            row = def.southRow;
+        } else if (normalized < -Math.PI / 4 && normalized > (-3 * Math.PI) / 4) {
+            row = def.northRow;
+        } else if (Math.abs(normalized) <= Math.PI / 4) {
+            row = def.eastRow;
+        } else {
+            row = def.eastRow;
+            flipX = true;
+        }
+
+        const actualRow = Math.max(0, Math.min(rows - 1, row));
+        const actualFrame = state === 'run' ? (frame % cols) : 0;
+        const box = analysis.boxes?.[actualRow]?.[actualFrame];
+        if (!box) return false;
+
+        const scale = Math.min(drawSize / analysis.maxW, drawSize / analysis.maxH);
+        const drawW = Math.max(1, Math.round(box.width * scale));
+        const drawH = Math.max(1, Math.round(box.height * scale));
+        const dx = -Math.round(drawW / 2);
+        const dy = Math.round(drawSize / 2 - drawH);
+
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        if (flipX) ctx.scale(-1, 1);
+        ctx.drawImage(
+            analysis.canvas,
+            box.left,
+            box.top,
+            box.width,
+            box.height,
+            dx,
+            dy,
+            drawW,
+            drawH
+        );
         ctx.restore();
         return true;
     }

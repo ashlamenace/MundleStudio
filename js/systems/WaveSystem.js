@@ -205,7 +205,16 @@ export class WaveSystem {
         this.bossWave = config.isBossWave;
         this.currentWaveType = config.waveType || 'mixed';
         const enemies = [...config.enemies];
-        this.currentPlayerScaling = this.getPlayerScaling(this.currentWaveType);
+        const versusMode = this.game.gameMode === 'versus_ffa';
+        this.currentPlayerScaling = versusMode
+            ? {
+                players: 1,
+                countMultiplier: 1,
+                statMultiplier: 1,
+                cadenceMultiplier: 1,
+                eliteBonus: 0
+            }
+            : this.getPlayerScaling(this.currentWaveType);
 
         // Add biome-specific enemies based on current biome
         const biomeEnemies = BiomeEnemies[this.spawnBiome] || [];
@@ -216,15 +225,31 @@ export class WaveSystem {
             }
         }
 
-        // Multiplayer scaling: increase wave volume with player count while
-        // preserving the current wave composition (boss stays unique).
-        this.applyPlayerScalingToWave(enemies);
-
-        this.spawnQueue = enemies;
+        if (versusMode) {
+            this.spawnQueue = this.buildVersusSpawnQueue(enemies);
+        } else {
+            // Multiplayer scaling: increase wave volume with player count while
+            // preserving the current wave composition (boss stays unique).
+            this.applyPlayerScalingToWave(enemies);
+            this.spawnQueue = enemies;
+        }
         this.spawnTimer = 0;
         this.spawnCadenceVariance = Math.min(0.32, 0.08 + this.currentWave * 0.008);
         this.spawnInterval = this.getDynamicSpawnInterval();
         this.updateWaveUI();
+    }
+
+    buildVersusSpawnQueue(baseEnemies) {
+        const activeSlots = this.game.getAliveCrystalSlots?.() ?? [];
+        if (activeSlots.length === 0) return [];
+
+        const queue = [];
+        for (let i = 0; i < baseEnemies.length; i++) {
+            for (const slot of activeSlots) {
+                queue.push({ type: baseEnemies[i], slot });
+            }
+        }
+        return queue;
     }
 
     getSpawnInterval() {
@@ -350,25 +375,30 @@ export class WaveSystem {
      * Spawn an enemy
      */
     spawnEnemy(type) {
-        const pos = this.getSpawnPosition();
+        const waveEntry = typeof type === 'object' && type !== null
+            ? type
+            : { type, slot: null };
+        const pos = this.getSpawnPosition(waveEntry.slot);
 
         let enemy;
         // Check if it's a boss type from EnemyTypes
         const bossTypes = ['berserkTitan', 'frostLord', 'infernoDrake', 'stormWraith', 'voidBehemoth'];
-        if (bossTypes.includes(type)) {
-            enemy = new Enemy(this.game, pos.x, pos.y, type);
+        if (bossTypes.includes(waveEntry.type)) {
+            enemy = new Enemy(this.game, pos.x, pos.y, waveEntry.type);
             this.bossSpawned = true;
             this.game._triggerBossEntrance(enemy);
-        } else if (type === 'boss') {
+        } else if (waveEntry.type === 'boss') {
             // Legacy boss support
             enemy = new Enemy(this.game, pos.x, pos.y, 'berserkTitan');
             this.bossSpawned = true;
             this.game._triggerBossEntrance(enemy);
         } else {
-            enemy = new Enemy(this.game, pos.x, pos.y, type);
+            enemy = new Enemy(this.game, pos.x, pos.y, waveEntry.type);
         }
 
-        enemy.aiDirective = this.getEnemyDirective(type);
+        enemy.aiDirective = this.getEnemyDirective(waveEntry.type);
+        enemy.targetCrystalSlot = waveEntry.slot ?? this.game.playerSlot ?? null;
+        enemy._laneSlot = enemy.targetCrystalSlot;
 
         // Early waves stay readable; 30+ minutes and 60+ minutes ramp harder.
         let scaleFactor = this.getEnemyStatScaleFactor(this.currentWave);
@@ -489,10 +519,17 @@ export class WaveSystem {
     /**
      * Get spawn position
      */
-    getSpawnPosition() {
+    getSpawnPosition(slot = null) {
         const player = this.game.player;
         const world = this.game.world;
         const margin = 100;
+
+        if (this.game.gameMode === 'versus_ffa') {
+            const island = world.getIslandForSlot?.(slot ?? this.game.playerSlot);
+            if (island) {
+                return this.getVersusSpawnPosition(island);
+            }
+        }
 
         let x, y;
         let attempts = 0;
@@ -510,6 +547,54 @@ export class WaveSystem {
         } while (Utils.distance(x, y, player.x, player.y) < 300 && attempts < 10);
 
         return { x, y };
+    }
+
+    getVersusSpawnPosition(island) {
+        const shape = island.shape;
+        if (!shape || shape.type !== 'ellipse') {
+            const inset = 48;
+            const positions = [
+                {
+                    x: Utils.randomFloat(island.bounds.left + inset, island.bounds.right - inset),
+                    y: island.bounds.top + inset
+                },
+                {
+                    x: island.bounds.right - inset,
+                    y: Utils.randomFloat(island.bounds.top + inset, island.bounds.bottom - inset)
+                },
+                {
+                    x: Utils.randomFloat(island.bounds.left + inset, island.bounds.right - inset),
+                    y: island.bounds.bottom - inset
+                },
+                {
+                    x: island.bounds.left + inset,
+                    y: Utils.randomFloat(island.bounds.top + inset, island.bounds.bottom - inset)
+                }
+            ];
+            return positions[Utils.randomInt(0, positions.length - 1)];
+        }
+
+        const edgeInset = 56;
+        const radiusX = Math.max(96, shape.radiusX - edgeInset);
+        const radiusY = Math.max(96, shape.radiusY - edgeInset);
+        const side = Utils.randomInt(0, 3);
+        const offset = Utils.randomFloat(-0.6, 0.6);
+
+        if (side === 0 || side === 2) {
+            const xNorm = offset;
+            const yNorm = Math.sqrt(Math.max(0, 1 - xNorm * xNorm));
+            return {
+                x: shape.centerX + xNorm * radiusX,
+                y: shape.centerY + (side === 0 ? -yNorm : yNorm) * radiusY
+            };
+        }
+
+        const yNorm = offset;
+        const xNorm = Math.sqrt(Math.max(0, 1 - yNorm * yNorm));
+        return {
+            x: shape.centerX + (side === 1 ? xNorm : -xNorm) * radiusX,
+            y: shape.centerY + yNorm * radiusY
+        };
     }
 
     /**
@@ -573,11 +658,17 @@ export class WaveSystem {
         }
 
         if (waveProgress) {
-            const enemies = this.game.getEnemies();
-            const total = this.spawnQueue.length + enemies.length;
-            const remaining = enemies.length;
-            const progress = total > 0 ? (1 - remaining / Math.max(total, 1)) * 100 : 100;
-            waveProgress.style.width = `${progress}%`;
+            const enemies    = this.game.getEnemies();
+            const spawnLeft  = typeof this._netSpawnLeft === 'number'
+                ? this._netSpawnLeft          // client: use host-authoritative value
+                : this.spawnQueue.length;     // host / solo: use local queue
+            const remaining  = enemies.length + spawnLeft;
+            // Track the maximum remaining seen since wave start to compute progress
+            this._netWaveStartTotal = Math.max(this._netWaveStartTotal || 0, remaining);
+            const progress = this._netWaveStartTotal > 0
+                ? (1 - remaining / this._netWaveStartTotal) * 100
+                : 100;
+            waveProgress.style.width = `${Math.max(0, Math.min(100, progress))}%`;
         }
     }
 
@@ -585,8 +676,22 @@ export class WaveSystem {
      * Client receives wave state from host — update local UI without spawning enemies.
      */
     receiveNetworkUpdate(msg) {
-        this.currentWave  = msg.wave ?? this.currentWave;
+        const wasActive   = this.isWaveActive;
+        this.currentWave  = msg.wave  ?? this.currentWave;
         this.isWaveActive = msg.active ?? this.isWaveActive;
+
+        if (typeof msg.spawnLeft === 'number') {
+            this._netSpawnLeft = msg.spawnLeft;
+        }
+        // Reset progress tracking when a new wave begins
+        if (!wasActive && this.isWaveActive) {
+            this._netWaveStartTotal = 0;
+        }
+        if (!this.isWaveActive) {
+            this._netSpawnLeft      = 0;
+            this._netWaveStartTotal = 0;
+        }
+
         this.updateWaveUI();
     }
 }

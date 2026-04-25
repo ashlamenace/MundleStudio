@@ -27,8 +27,9 @@ function hashString(str) {
 
 export class RemotePlayer extends Entity {
     constructor(game, playerId) {
-        const cx = game.world?.width  / 2 ?? 1600;
-        const cy = game.world?.height / 2 ?? 1600;
+        // world may not exist yet when created from init() pending flush
+        const cx = game.world != null ? game.world.width  / 2 : 1600;
+        const cy = game.world != null ? game.world.height / 2 : 1600;
         super(game, cx, cy);
 
         this.type     = 'remotePlayer';
@@ -40,6 +41,7 @@ export class RemotePlayer extends Entity {
 
         // Rendered state
         this.facingAngle  = 0;
+        this.spriteFacingAngle = Math.PI / 2;
         this._animState   = 'idle';
         this._facingLeft  = false;
         this._animFrame   = 0;
@@ -50,8 +52,8 @@ export class RemotePlayer extends Entity {
         // Physics: don't block local player movement
         this.solid           = false;
         this.collisionRadius = 0;
-        this.width           = 32;
-        this.height          = 32;
+        this.width           = 38;
+        this.height          = 38;
 
         // Cave tracking — updated via PLAYER_UPDATE
         this._inCave = false;
@@ -73,6 +75,7 @@ export class RemotePlayer extends Entity {
         this.health      = data.hp    ?? this.health;
         this.maxHealth   = data.maxHp ?? this.maxHealth;
         this.facingAngle = data.angle ?? 0;
+        this.spriteFacingAngle = data.dirAngle ?? data.angle ?? this.spriteFacingAngle;
         this._animState  = data.anim  ?? 'idle';
         this._facingLeft = data.flip  ?? false;
         this._animFrame  = data.frame ?? 0;
@@ -94,17 +97,25 @@ export class RemotePlayer extends Entity {
         ctx.save();
         ctx.translate(this.x, this.y);
 
-        const DRAW = 72;
+        const DRAW = 64;
+        const STATIC_DRAW = 38;
 
         // Map animation state to sprite key
         const animKey = this._getAnimKey(this._slot, this._animState);
+        const bodyFlip = Math.cos(this.spriteFacingAngle || 0) < 0;
 
-        const drawn = spriteManager.drawUnitFrame(ctx, animKey, this._animFrame, DRAW, DRAW, this._facingLeft);
+        const drawn = spriteManager.drawStaticPlayerFrame(ctx, STATIC_DRAW, bodyFlip) || spriteManager.drawDirectionalPlayerFrame(
+            ctx,
+            this._animState || 'idle',
+            this._animFrame || 0,
+            this.spriteFacingAngle || 0,
+            DRAW
+        ) || spriteManager.drawUnitFrame(ctx, animKey, this._animFrame, DRAW, DRAW, bodyFlip);
 
         if (!drawn) {
             // Fallback to player sprite sheet (never a plain circle)
             const fallbackDrawn = spriteManager.drawPlayerFallbackFrame(
-                ctx, this._animFrame || 0, 52, 52, this._facingLeft
+                ctx, this._animFrame || 0, 64, 64, bodyFlip
             );
             if (!fallbackDrawn) {
                 ctx.fillStyle = this._tint;
