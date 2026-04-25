@@ -20,7 +20,13 @@ export class HUD {
             waveIndicator: document.getElementById('wave-indicator'),
             waveWarning: document.getElementById('wave-warning'),
             skipToNightBtn: document.getElementById('skip-to-night-btn'),
-            turretCounter: document.getElementById('turret-counter')
+            turretCounter: document.getElementById('turret-counter'),
+            bonusRaidOffer: document.getElementById('bonus-raid-offer'),
+            bonusRaidTitle: document.getElementById('bonus-raid-title'),
+            bonusRaidCost: document.getElementById('bonus-raid-cost'),
+            bonusRaidAccept: document.getElementById('bonus-raid-accept'),
+            bonusRaidDecline: document.getElementById('bonus-raid-decline'),
+            bonusRaidTimerFill: document.getElementById('bonus-raid-timer-fill')
         };
 
         // Warning threshold
@@ -29,6 +35,7 @@ export class HUD {
         // Setup action bar click handlers
         this.setupActionBar();
         this.setupWaveControls();
+        this.setupBonusRaidControls();
     }
     
     /**
@@ -58,6 +65,15 @@ export class HUD {
         });
     }
 
+    setupBonusRaidControls() {
+        this.elements.bonusRaidAccept?.addEventListener('click', () => {
+            this.game.acceptBonusRaidOffer?.();
+        });
+        this.elements.bonusRaidDecline?.addEventListener('click', () => {
+            this.game.declineBonusRaidOffer?.();
+        });
+    }
+
     /**
      * Update HUD elements
      */
@@ -65,6 +81,7 @@ export class HUD {
         this.updateHealthBars();
         this.updateWaveInfo();
         this.updateTurretCounter();
+        this.updateBonusRaidOffer();
     }
 
     /**
@@ -183,6 +200,35 @@ export class HUD {
             el.style.color = '#ff9944';
         } else {
             el.style.color = '#ffffff';
+        }
+    }
+
+    updateBonusRaidOffer() {
+        const offer = this.game.bonusRaidOffer;
+        const box = this.elements.bonusRaidOffer;
+        if (!box) return;
+
+        if (!offer) {
+            box.classList.add('hidden');
+            return;
+        }
+
+        box.classList.remove('hidden');
+        const remaining = Math.max(0, offer.expiresAt - performance.now());
+        const pct = offer.durationMs > 0 ? (remaining / offer.durationMs) * 100 : 0;
+
+        if (this.elements.bonusRaidTitle) {
+            const plural = offer.targetCount > 1 ? 's' : '';
+            this.elements.bonusRaidTitle.textContent = `${offer.label} vers ${offer.targetCount} adversaire${plural}`;
+        }
+        if (this.elements.bonusRaidCost) {
+            this.elements.bonusRaidCost.textContent = this.game.formatCost?.(offer.cost) ?? '';
+        }
+        if (this.elements.bonusRaidTimerFill) {
+            this.elements.bonusRaidTimerFill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+        }
+        if (this.elements.bonusRaidAccept) {
+            this.elements.bonusRaidAccept.disabled = !this.game.canAffordBonusRaidOffer?.();
         }
     }
 }

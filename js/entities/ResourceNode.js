@@ -89,7 +89,9 @@ export class ResourceNode extends Entity {
         this.scale = 0.8 + seededRandom(nodeSeed, 11) * 0.4;
         this.width = 32 * this.scale;
         this.height = 32 * this.scale;
-        this.collisionRadius = 16 * this.scale;
+        this.collisionRadius = this.getDefaultCollisionRadius();
+        this.collisionOffsetX = 0;
+        this.collisionOffsetY = resourceType === 'wood' ? -13 * this.scale : 0;
 
         // Resource amount
         const amountRange = Math.max(0, config.amount.max - config.amount.min);
@@ -105,6 +107,19 @@ export class ResourceNode extends Entity {
 
         // Cannot be pushed
         this.solid = true;
+    }
+
+    getDefaultCollisionRadius() {
+        if (this.resourceType === 'wood') return 4 * this.scale;
+        if (this.resourceType === 'stone') return 14 * this.scale;
+        return 16 * this.scale;
+    }
+
+    getCollisionCenter() {
+        return {
+            x: this.x + (this.collisionOffsetX || 0),
+            y: this.y + (this.collisionOffsetY || 0)
+        };
     }
 
     update(deltaTime) {

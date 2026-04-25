@@ -84,6 +84,8 @@ export class Game {
             voterIds: new Set(),
             requiredIds: []
         };
+        this.bonusRaidOffer = null;
+        this._bonusRaidOfferCooldown = 0;
 
         // Initialize core systems
         this.input = new Input(canvas);
@@ -121,6 +123,7 @@ export class Game {
         this.gameModeConfig = getGameModeConfig(this.gameMode);
         this.matchState = createMatchState(this.gameMode);
         this.resetSkipToNightVotes();
+        this.resetBonusRaidOffer();
     }
 
     getModeRules() {
@@ -391,6 +394,132 @@ export class Game {
             if (!targetSlot || this.isSlotEliminated(targetSlot)) return false;
             return targetSlot !== ownerSlot;
         });
+    }
+
+    resetBonusRaidOffer() {
+        this.bonusRaidOffer = null;
+        this._bonusRaidOfferCooldown = 18 + Math.random() * 24;
+    }
+
+    getBonusRaidTargetSlots(attackerSlot = this.playerSlot ?? this.resolvePlayerSlot()) {
+        if (this.gameMode !== GameMode.VERSUS_FFA) return [];
+        return (this.getAliveCrystalSlots?.() ?? this.getActiveVersusSlots?.() ?? [])
+            .filter(slot => slot && slot !== attackerSlot && !this.isSlotEliminated(slot));
+    }
+
+    updateBonusRaidOffers(dt) {
+        if (this.gameMode !== GameMode.VERSUS_FFA || this.state !== 'playing') {
+            this.bonusRaidOffer = null;
+            return;
+        }
+
+        const now = performance.now();
+        if (this.bonusRaidOffer) {
+            if (now >= this.bonusRaidOffer.expiresAt) {
+                this.bonusRaidOffer = null;
+                this._bonusRaidOfferCooldown = 28 + Math.random() * 42;
+            }
+            return;
+        }
+
+        if (this.matchState?.localPlayerEliminated || this.inCave) return;
+        if (this.getBonusRaidTargetSlots().length === 0) return;
+
+        this._bonusRaidOfferCooldown -= dt;
+        if (this._bonusRaidOfferCooldown > 0) return;
+
+        this.bonusRaidOffer = this.createBonusRaidOffer();
+    }
+
+    createBonusRaidOffer() {
+        const wave = Math.max(1, (this.waveSystem?.currentWave ?? 0) + 1, this.survivalDays + 1);
+        const variants = [
+            { id: 'swarm', label: 'Raid rapide', countScale: 1.15 },
+            { id: 'siege', label: 'Raid siege', countScale: 0.78 },
+            { id: 'mixed', label: 'Raid mixte', countScale: 1.0 }
+        ];
+        const variant = variants[Math.floor(Math.random() * variants.length)] ?? variants[0];
+        const cost = {
+            wood: 24 + wave * 7,
+            stone: 18 + wave * 5
+        };
+        if (wave >= 4) cost.metal = 8 + Math.floor(wave * 2.5);
+        if (wave >= 9) cost.amethyst = 3 + Math.floor(wave * 0.9);
+
+        const targetCount = this.getBonusRaidTargetSlots().length;
+        const durationMs = 10000;
+        return {
+            id: `${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+            type: variant.id,
+            label: variant.label,
+            countScale: variant.countScale,
+            wave,
+            cost,
+            targetCount,
+            durationMs,
+            expiresAt: performance.now() + durationMs
+        };
+    }
+
+    canAffordBonusRaidOffer() {
+        return !!this.bonusRaidOffer && !!this.resourceSystem?.hasResources?.(this.bonusRaidOffer.cost);
+    }
+
+    acceptBonusRaidOffer() {
+        const offer = this.bonusRaidOffer;
+        if (!offer || !this.canAffordBonusRaidOffer()) return false;
+
+        const targetSlots = this.getBonusRaidTargetSlots();
+        if (targetSlots.length === 0) {
+            this.declineBonusRaidOffer();
+            return false;
+        }
+
+        if (!this.resourceSystem.spendResources(offer.cost)) return false;
+
+        const payload = {
+            offerId: offer.id,
+            raidType: offer.type,
+            wave: offer.wave,
+            countScale: offer.countScale
+        };
+
+        if (this.networkManager?.inRoom) {
+            this.networkManager.requestBonusRaid(payload);
+        } else {
+            this.receiveBonusRaidRequest(this.networkManager?.playerId ?? 'local', payload);
+        }
+
+        this.showNotification('Raid envoye', 'Une vague bonus part chez les adversaires.', '#ffb347', 2);
+        this.bonusRaidOffer = null;
+        this._bonusRaidOfferCooldown = 42 + Math.random() * 46;
+        return true;
+    }
+
+    declineBonusRaidOffer() {
+        if (!this.bonusRaidOffer) return;
+        this.bonusRaidOffer = null;
+        this._bonusRaidOfferCooldown = 24 + Math.random() * 34;
+    }
+
+    receiveBonusRaidRequest(attackerId = null, payload = {}) {
+        if (this.gameMode !== GameMode.VERSUS_FFA || !this.waveSystem) return false;
+        const attackerSlot = this.resolvePlayerSlot(attackerId);
+        if (!attackerSlot || this.isSlotEliminated(attackerSlot)) return false;
+
+        const targetSlots = this.getBonusRaidTargetSlots(attackerSlot);
+        if (targetSlots.length === 0) return false;
+
+        this.waveSystem.enqueueBonusVersusRaid({
+            attackerId,
+            attackerSlot,
+            targetSlots,
+            raidType: payload.raidType,
+            wave: payload.wave,
+            countScale: payload.countScale
+        });
+        this.networkManager?.broadcastWaveUpdate?.(this.waveSystem.currentWave, this.waveSystem.isWaveActive);
+        return true;
     }
 
     applyVersusStructureHit(data) {
@@ -1767,6 +1896,7 @@ export class Game {
         this.camera.update(dt);
 
         // Update HUD
+        this.updateBonusRaidOffers(dt);
         this.hud.update(dt);
         this.versusStatus?.update(dt);
     }

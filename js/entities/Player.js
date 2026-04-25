@@ -82,6 +82,7 @@ export class Player extends Entity {
         this._actionAnimTimer = 0;
         this._hurtAnimTimer = 0;
         this._meleeSwingAlt = false;
+        this.playerSpriteKey = spriteManager.getRandomPlayerSpriteKey();
 
         // Bow sprites
         this.bowSprites = {};
@@ -298,6 +299,26 @@ export class Player extends Entity {
                 this.y = oldY;
             }
 
+            // Resource collision: live trees and rocks should be physical obstacles.
+            for (const resource of this.game.entities) {
+                if (resource.type !== 'resource' || resource.destroyed || !resource.solid) continue;
+                if (resource.resourceType !== 'wood' && resource.resourceType !== 'stone') continue;
+
+                const center = resource.getCollisionCenter?.() ?? resource;
+                const dist = Utils.distance(this.x, this.y, center.x, center.y);
+                const minDist = this.collisionRadius + resource.collisionRadius;
+
+                if (dist > 0 && dist < minDist) {
+                    const angle = Utils.angle(center.x, center.y, this.x, this.y);
+                    const overlap = minDist - dist;
+                    this.x += Math.cos(angle) * overlap;
+                    this.y += Math.sin(angle) * overlap;
+                } else if (dist === 0) {
+                    this.x = oldX;
+                    this.y = oldY;
+                }
+            }
+
             // Building collision
             if (this.game.buildingSystem) {
                 for (const building of this.game.buildingSystem.buildings) {
@@ -434,8 +455,7 @@ export class Player extends Entity {
 
         if (this._actionAnimKey) return this._actionAnimKey;
         if (tool?.type === 'ranged') return 'adventure_bow';
-        if (tool?.toolType === 'pickaxe') return 'adventure_thrust';
-        if (tool?.toolType === 'axe') return 'adventure_sword_back';
+        if (tool?.type === 'tool') return 'adventure_farm';
         if (tool?.type === 'build') return 'adventure_sword';
         if (tool?.specialEffect === 'fire') return 'adventure_flame_punch';
         if ((tool?.tier || 1) >= 4) return 'adventure_power';
@@ -522,8 +542,7 @@ export class Player extends Entity {
 
     _chooseActionAnimKey(tool) {
         if (tool?.type === 'ranged') return 'adventure_bow';
-        if (tool?.toolType === 'pickaxe') return 'adventure_thrust';
-        if (tool?.toolType === 'axe') return 'adventure_sword_back';
+        if (tool?.type === 'tool') return 'adventure_farm';
         if (tool?.type === 'build') return 'adventure_sword';
         if (tool?.specialEffect === 'fire') return 'adventure_flame_punch';
         if ((tool?.tier || 1) >= 4) return 'adventure_power';
@@ -1126,7 +1145,7 @@ export class Player extends Entity {
         // Sprite animation
         const tool = this.tools[this.selectedSlot];
         const animKey = this._getAnimKey(tool, this._animState || 'idle');
-        const DRAW = 48;
+        const DRAW = 72;
         const bodyFlip = Math.cos(this.spriteFacingAngle || 0) < 0;
         const adventureAnimKey = this._currentAnimKey || this._getAdventureAnimKey(tool, this._animState || 'idle');
         const drawnSprite = spriteManager.drawAdventurePlayerFrame(
@@ -1134,7 +1153,8 @@ export class Player extends Entity {
             adventureAnimKey,
             this._animFrame || 0,
             DRAW,
-            bodyFlip
+            bodyFlip,
+            this.playerSpriteKey
         ) || spriteManager.drawDirectionalPlayerFrame(
             ctx,
             this._animState || 'idle',
@@ -1149,10 +1169,6 @@ export class Player extends Entity {
             spriteManager.drawPlayerFallbackFrame(
                 ctx, this._animFrame || 0, 64, 64, bodyFlip
             );
-        }
-
-        if (!this._currentAnimKey?.startsWith('adventure_') || this._animState !== 'attack') {
-            this.renderEquippedTool(ctx, tool);
         }
 
         // Level display below player

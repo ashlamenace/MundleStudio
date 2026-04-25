@@ -28,6 +28,9 @@ export class WaveSystem {
 
         // Spawning
         this.spawnQueue = [];
+        this.bonusSpawnQueue = [];
+        this.bonusSpawnTimer = 0;
+        this.bonusSpawnInterval = 0.42;
         this.spawnTimer = 0;
         this.spawnInterval = 0.5;
         this.currentWaveType = 'mixed';
@@ -351,7 +354,8 @@ export class WaveSystem {
      * Update wave system
      */
     update(deltaTime) {
-        if (!this.isWaveActive) return;
+        const hasBonusSpawns = this.bonusSpawnQueue.length > 0;
+        if (!this.isWaveActive && !hasBonusSpawns) return;
 
         if (this.spawnQueue.length > 0) {
             this.spawnTimer += deltaTime;
@@ -363,7 +367,17 @@ export class WaveSystem {
             }
         }
 
-        if (this.spawnQueue.length === 0) {
+        if (this.bonusSpawnQueue.length > 0) {
+            this.bonusSpawnTimer += deltaTime;
+
+            if (this.bonusSpawnTimer >= this.bonusSpawnInterval) {
+                this.bonusSpawnTimer = 0;
+                this.spawnEnemy(this.bonusSpawnQueue.shift());
+                this.bonusSpawnInterval = Utils.randomFloat(0.34, 0.55);
+            }
+        }
+
+        if (this.isWaveActive && this.spawnQueue.length === 0 && this.bonusSpawnQueue.length === 0) {
             const enemies = this.game.getEnemies();
             if (enemies.length === 0) {
                 this.endWave();
@@ -401,7 +415,8 @@ export class WaveSystem {
         enemy._laneSlot = enemy.targetCrystalSlot;
 
         // Early waves stay readable; 30+ minutes and 60+ minutes ramp harder.
-        let scaleFactor = this.getEnemyStatScaleFactor(this.currentWave);
+        const effectiveWave = Math.max(1, Math.floor(waveEntry.wave ?? this.currentWave ?? 1));
+        let scaleFactor = this.getEnemyStatScaleFactor(effectiveWave);
         scaleFactor *= this.currentPlayerScaling?.statMultiplier ?? 1;
 
         enemy.maxHealth = Math.floor(enemy.maxHealth * scaleFactor);
@@ -409,7 +424,7 @@ export class WaveSystem {
         enemy.damage = Math.floor(enemy.damage * scaleFactor);
 
         if (this.currentWaveType === 'boss') {
-            const bossWaveMultiplier = this.getBossWaveMultiplier(this.currentWave);
+            const bossWaveMultiplier = this.getBossWaveMultiplier(effectiveWave);
             enemy.maxHealth = Math.floor(enemy.maxHealth * bossWaveMultiplier);
             enemy.health = enemy.maxHealth;
             enemy.damage = Math.floor(enemy.damage * bossWaveMultiplier);
@@ -417,9 +432,9 @@ export class WaveSystem {
 
         // Elite pressure now ramps again after 30 and 60 minutes.
         const eliteBonus = this.currentPlayerScaling?.eliteBonus ?? 0;
-        const eliteStats = this.getEliteStats(this.currentWave);
+        const eliteStats = this.getEliteStats(effectiveWave);
         const eliteChance = Math.min(0.5, eliteStats.chance + eliteBonus);
-        if (this.currentWave >= 4 && Utils.seededRandom() < eliteChance && !enemy.isBoss) {
+        if (effectiveWave >= 4 && Utils.seededRandom() < eliteChance && !enemy.isBoss) {
             enemy.isElite = true;
             enemy.maxHealth = Math.floor(enemy.maxHealth * eliteStats.healthMultiplier);
             enemy.health = enemy.maxHealth;
@@ -455,6 +470,57 @@ export class WaveSystem {
 
         // Register this enemy with the network (host assigns _netId and broadcasts ENEMY_SPAWN)
         this.game.networkManager?.registerEnemy(enemy);
+    }
+
+    enqueueBonusVersusRaid(options = {}) {
+        if (this.game.gameMode !== 'versus_ffa') return 0;
+
+        const targetSlots = (options.targetSlots ?? [])
+            .filter(slot => slot && !this.game.isSlotEliminated?.(slot));
+        if (targetSlots.length === 0) return 0;
+
+        const wave = Math.max(1, Math.floor(options.wave ?? this.currentWave + 1));
+        const raidType = options.raidType ?? 'mixed';
+        const countScale = Math.max(0.5, Math.min(1.6, Number(options.countScale ?? 1)));
+        const count = Math.max(4, Math.floor((5 + wave * 1.35) * countScale));
+        const pool = this.getBonusRaidEnemyPool(raidType, wave);
+        let added = 0;
+
+        for (const slot of targetSlots) {
+            for (let i = 0; i < count; i++) {
+                this.bonusSpawnQueue.push({
+                    type: pool[Utils.seededInt(0, pool.length - 1)],
+                    slot,
+                    wave,
+                    bonusRaid: true,
+                    attackerSlot: options.attackerSlot ?? null
+                });
+                added++;
+            }
+        }
+
+        this.updateWaveUI();
+        return added;
+    }
+
+    getBonusRaidEnemyPool(raidType, wave) {
+        if (raidType === 'swarm') {
+            const pool = ['grunt', 'grunt', 'speeder', 'speeder'];
+            if (wave >= 6) pool.push('iceWolf', 'scorpion');
+            return pool;
+        }
+
+        if (raidType === 'siege') {
+            const pool = ['tank', 'tank', 'bomber'];
+            if (wave >= 5) pool.push('mummy', 'swampThing');
+            if (wave >= 12) pool.push('lavaGolem');
+            return pool;
+        }
+
+        const pool = ['grunt', 'speeder', 'tank', 'bomber'];
+        if (wave >= 5) pool.push('scorpion', 'poisonFrog');
+        if (wave >= 10) pool.push('fireImp', 'frostElemental');
+        return pool;
     }
 
     getPlayerScaling(waveType = 'mixed') {
@@ -617,7 +683,7 @@ export class WaveSystem {
      */
     getRemainingEnemies() {
         const enemies = this.game.getEnemies();
-        return this.spawnQueue.length + enemies.length;
+        return this.spawnQueue.length + this.bonusSpawnQueue.length + enemies.length;
     }
 
     /**
@@ -676,7 +742,7 @@ export class WaveSystem {
             const enemies    = this.game.getEnemies();
             const spawnLeft  = typeof this._netSpawnLeft === 'number'
                 ? this._netSpawnLeft          // client: use host-authoritative value
-                : this.spawnQueue.length;     // host / solo: use local queue
+                : this.spawnQueue.length + this.bonusSpawnQueue.length;     // host / solo: use local queue
             const remaining  = enemies.length + spawnLeft;
             // Track the maximum remaining seen since wave start to compute progress
             this._netWaveStartTotal = Math.max(this._netWaveStartTotal || 0, remaining);

@@ -46,6 +46,7 @@ export class RemotePlayer extends Entity {
         this._facingLeft  = false;
         this._animFrame   = 0;
         this._currentAnimKey = 'adventure_idle';
+        this.playerSpriteKey = 'adventure_player';
         this.level        = 1;
         this.maxHealth    = 120;
         this.health       = 120;
@@ -83,6 +84,7 @@ export class RemotePlayer extends Entity {
         this.level       = data.lvl   ?? 1;
         this._slot       = data.slot  ?? this._slot ?? 1;
         this._currentAnimKey = data.animKey ?? this._getAdventureAnimKey(this._slot, this._animState);
+        this.playerSpriteKey = spriteManager.normalizePlayerSpriteKey(data.spriteKey ?? this.playerSpriteKey);
         this._caveId     = data.cave  ?? null;
         this._inCave     = !!data.cave;
     }
@@ -109,8 +111,9 @@ export class RemotePlayer extends Entity {
             ctx,
             adventureAnimKey,
             this._animFrame || 0,
-            48,
-            bodyFlip
+            72,
+            bodyFlip,
+            this.playerSpriteKey
         ) || spriteManager.drawDirectionalPlayerFrame(
             ctx,
             this._animState || 'idle',
@@ -207,8 +210,7 @@ export class RemotePlayer extends Entity {
 
         const s = Math.max(1, Math.min(5, Number(slot) || 1));
         if (s === 4) return 'adventure_bow';
-        if (s === 3) return 'adventure_thrust';
-        if (s === 2) return 'adventure_sword_back';
+        if (s === 2 || s === 3) return 'adventure_farm';
         return 'adventure_sword';
     }
 }

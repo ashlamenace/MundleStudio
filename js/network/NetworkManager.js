@@ -302,6 +302,10 @@ export class NetworkManager {
                 if (this.isHost) game.requestSkipToNight(msg._from ?? null);
                 break;
 
+            case 'REQUEST_BONUS_RAID':
+                if (this.isHost) game.receiveBonusRaidRequest?.(msg._from ?? null, msg);
+                break;
+
             case 'SKIP_TO_NIGHT_VOTE_STATE':
                 game.applySkipToNightVoteState?.(msg);
                 break;
@@ -412,6 +416,7 @@ export class NetworkManager {
             dirAngle: p.spriteFacingAngle ?? p.facingAngle,
             anim   : p._animState  ?? 'idle',
             animKey: p._currentAnimKey ?? null,
+            spriteKey: p.playerSpriteKey ?? 'adventure_player',
             flip   : p._facingLeft ?? false,
             frame  : p._animFrame  ?? 0,
             slot   : p.selectedSlot ?? p.currentSlot ?? 1,
@@ -786,6 +791,25 @@ export class NetworkManager {
         });
     }
 
+    requestBonusRaid(payload = {}) {
+        if (!this.ready || !this.inRoom) return;
+
+        const data = {
+            type: 'REQUEST_BONUS_RAID',
+            offerId: payload.offerId ?? null,
+            raidType: payload.raidType ?? 'mixed',
+            wave: Math.max(1, Math.floor(Number(payload.wave ?? 1))),
+            countScale: Math.max(0.5, Math.min(1.6, Number(payload.countScale ?? 1)))
+        };
+
+        if (this.isHost) {
+            this.game.receiveBonusRaidRequest?.(this.playerId, data);
+            return;
+        }
+
+        this._relayHost(data);
+    }
+
     _buildVersusMatchStatePayload() {
         return this.game.getVersusMatchSnapshot?.() ?? null;
     }
@@ -857,7 +881,7 @@ export class NetworkManager {
             type      : 'WAVE_UPDATE',
             wave      : waveNum,
             active    : isActive,
-            spawnLeft : ws?.spawnQueue?.length ?? 0,
+            spawnLeft : (ws?.spawnQueue?.length ?? 0) + (ws?.bonusSpawnQueue?.length ?? 0),
         });
     }
 

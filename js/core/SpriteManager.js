@@ -29,6 +29,30 @@ class SpriteManager {
             key: 'phantom_idle'
         };
 
+        this.playerSpriteKeys = [
+            'adventure_player',
+            'adventure_boy_a',
+            'adventure_boy_b',
+            'adventure_boy_c',
+            'adventure_boy_d',
+            'adventure_knight_a',
+            'adventure_knight_b',
+            'adventure_knight_c',
+            'adventure_knight_d',
+            'adventure_knight_e',
+            'adventure_knight_f',
+            'adventure_knight_g',
+            'adventure_knight_h',
+            'adventure_special_knight_1',
+            'adventure_special_knight_2',
+            'adventure_special_knight_3',
+            'adventure_special_knight_4',
+            'adventure_worker_a',
+            'adventure_worker_b',
+            'adventure_worker_c',
+            'adventure_worker_d'
+        ];
+
         // Animation frame counts for player
         this.playerAnims = {
             adventure_idle:        { key: 'adventure_player', row: 0, frames: 6 },
@@ -38,9 +62,10 @@ class SpriteManager {
             adventure_sword:       { key: 'adventure_player', row: 6, frames: 5 },
             adventure_power:       { key: 'adventure_player', row: 8, frames: 5 },
             adventure_thrust:      { key: 'adventure_player', row: 9, frames: 7 },
-            adventure_flame_punch: { key: 'adventure_player', row: 10, frames: 8 },
+            adventure_farm:        { key: 'adventure_player', row: 7, frames: 8 },
+            adventure_flame_punch: { key: 'adventure_player', row: 10, frames: 4 },
             adventure_bow:         { key: 'adventure_player', row: 12, frames: 4 },
-            adventure_hurt:        { key: 'adventure_player', row: 18, frames: 4 },
+            adventure_hurt:        { key: 'adventure_player', row: 10, frames: 4 },
             warrior_idle:   { key: 'warrior_idle',    frames: 8 },
             warrior_run:    { key: 'warrior_run',     frames: 6 },
             warrior_attack: { key: 'warrior_attack1', frames: 4 },
@@ -61,31 +86,31 @@ class SpriteManager {
         // Enemy type → animated sprite definition
         // idleF / runF = frame counts (Tiny Swords: warriors 8i/6r, others 6i/6r, archers 6i/4r)
         this.enemyAnims = {
-            grunt:          { idle: 'e_red_pawn_idle',    run: 'e_red_pawn_run',    idleF: 6, runF: 6 },
-            speeder:        { idle: 'e_yel_archer_idle',  run: 'e_yel_archer_run',  idleF: 6, runF: 4 },
-            tank:           { idle: 'e_blk_warrior_idle', run: 'e_blk_warrior_run', idleF: 8, runF: 6 },
-            bomber:         { idle: 'e_blk_pawn_idle',    run: 'e_blk_pawn_run',    idleF: 6, runF: 6 },
-            scorpion:       { idle: 'e_red_lancer_idle',  run: 'e_red_lancer_run',  idleF: 6, runF: 6 },
-            mummy:          { idle: 'e_blk_monk_idle',    run: 'e_blk_monk_run',    idleF: 6, runF: 6 },
-            frostElemental: { idle: 'e_blu_lancer_idle',  run: 'e_blu_lancer_run',  idleF: 6, runF: 6 },
-            iceWolf:        { idle: 'e_blu_pawn_idle',    run: 'e_blu_pawn_run',    idleF: 6, runF: 6 },
-            swampThing:     { idle: 'e_blk_pawn_idle',    run: 'e_blk_pawn_run',    idleF: 6, runF: 6 },
-            poisonFrog:     { idle: 'e_red_pawn_idle',    run: 'e_red_pawn_run',    idleF: 6, runF: 6 },
-            fireImp:        { idle: 'e_red_archer_idle',  run: 'e_red_archer_run',  idleF: 6, runF: 4 },
-            lavaGolem:      { idle: 'e_blk_warrior_idle', run: 'e_blk_warrior_run', idleF: 8, runF: 6 },
-            wanderer:       { idle: 'e_pur_warrior_idle', run: 'e_pur_warrior_run', idleF: 8, runF: 6 },
-            mimic:          { idle: 'e_yel_pawn_idle',    run: 'e_yel_pawn_run',    idleF: 6, runF: 6 },
-            shadow:         { idle: 'e_blk_monk_idle',    run: 'e_blk_monk_run',    idleF: 6, runF: 6 },
+            grunt:          { idle: 'bm_red_cap',           run: 'bm_red_cap',           idleF: 4, runF: 4, frameSize: 16, basic: true },
+            speeder:        { idle: 'bm_bloodshot_eye',     run: 'bm_bloodshot_eye',     idleF: 4, runF: 4, frameSize: 16, basic: true },
+            tank:           { idle: 'bm_stone_troll',       run: 'bm_stone_troll',       idleF: 4, runF: 4, frameSize: 16, basic: true },
+            bomber:         { idle: 'bm_death_slime',       run: 'bm_death_slime',       idleF: 4, runF: 4, frameSize: 16, basic: true },
+            scorpion:       { idle: 'bm_crimson_slaad',     run: 'bm_crimson_slaad',     idleF: 4, runF: 4, frameSize: 16, basic: true },
+            mummy:          { idle: 'bm_blinded_grimlock',  run: 'bm_blinded_grimlock',  idleF: 4, runF: 4, frameSize: 16, basic: true },
+            frostElemental: { idle: 'bm_ocular_watcher',    run: 'bm_ocular_watcher',    idleF: 4, runF: 4, frameSize: 16, basic: true },
+            iceWolf:        { idle: 'bm_murky_slaad',       run: 'bm_murky_slaad',       idleF: 4, runF: 4, frameSize: 16, basic: true },
+            swampThing:     { idle: 'bm_fungal_myconid',    run: 'bm_fungal_myconid',    idleF: 4, runF: 4, frameSize: 16, basic: true },
+            poisonFrog:     { idle: 'bm_ochre_jelly',       run: 'bm_ochre_jelly',       idleF: 4, runF: 4, frameSize: 16, basic: true },
+            fireImp:        { idle: 'bm_crimson_slaad',     run: 'bm_crimson_slaad',     idleF: 4, runF: 4, frameSize: 16, basic: true },
+            lavaGolem:      { idle: 'bm_brawny_ogre',       run: 'bm_brawny_ogre',       idleF: 4, runF: 4, frameSize: 16, basic: true },
+            wanderer:       { idle: 'bm_blinded_grimlock',  run: 'bm_blinded_grimlock',  idleF: 4, runF: 4, frameSize: 16, basic: true },
+            mimic:          { idle: 'bm_shrieker_mushroom', run: 'bm_shrieker_mushroom', idleF: 4, runF: 4, frameSize: 16, basic: true },
+            shadow:         { idle: 'bm_death_slime',       run: 'bm_death_slime',       idleF: 4, runF: 4, frameSize: 16, basic: true },
             // Bosses
-            berserkTitan:   { idle: 'e_blk_warrior_idle', run: 'e_blk_warrior_run', idleF: 8, runF: 6 },
-            frostLord:      { idle: 'e_blu_lancer_idle',  run: 'e_blu_lancer_run',  idleF: 6, runF: 6 },
-            infernoDrake:   { idle: 'e_red_warrior_idle', run: 'e_red_warrior_run', idleF: 8, runF: 6 },
-            stormWraith:    { idle: 'e_pur_warrior_idle', run: 'e_pur_warrior_run', idleF: 8, runF: 6 },
-            voidBehemoth:   { idle: 'e_blk_warrior_idle', run: 'e_blk_warrior_run', idleF: 8, runF: 6 },
-            bat:            { idle: 'e_blk_pawn_idle',    run: 'e_blk_pawn_run',    idleF: 6, runF: 6 },
-            spider:         { idle: 'e_blk_lancer_idle',  run: 'e_blk_lancer_run',  idleF: 6, runF: 6 },
-            golem:          { idle: 'e_blk_warrior_idle', run: 'e_blk_warrior_run', idleF: 8, runF: 6 },
-            crystalGuardian:{ idle: 'e_pur_warrior_idle', run: 'e_pur_warrior_run', idleF: 8, runF: 6 },
+            berserkTitan:   { idle: 'bm_humongous_ettin',  run: 'bm_humongous_ettin',  idleF: 4, runF: 4, frameSize: 16, basic: true },
+            frostLord:      { idle: 'bm_crushing_cyclops', run: 'bm_crushing_cyclops', idleF: 4, runF: 4, frameSize: 16, basic: true },
+            infernoDrake:   { idle: 'bm_brawny_ogre',      run: 'bm_brawny_ogre',      idleF: 4, runF: 4, frameSize: 16, basic: true },
+            stormWraith:    { idle: 'bm_ocular_watcher',   run: 'bm_ocular_watcher',   idleF: 4, runF: 4, frameSize: 16, basic: true },
+            voidBehemoth:   { idle: 'bm_humongous_ettin',  run: 'bm_humongous_ettin',  idleF: 4, runF: 4, frameSize: 16, basic: true },
+            bat:            { idle: 'bm_bloodshot_eye',    run: 'bm_bloodshot_eye',    idleF: 4, runF: 4, frameSize: 16, basic: true },
+            spider:         { idle: 'bm_crimson_slaad',    run: 'bm_crimson_slaad',    idleF: 4, runF: 4, frameSize: 16, basic: true },
+            golem:          { idle: 'bm_stone_troll',      run: 'bm_stone_troll',      idleF: 4, runF: 4, frameSize: 16, basic: true },
+            crystalGuardian:{ idle: 'bm_crushing_cyclops', run: 'bm_crushing_cyclops', idleF: 4, runF: 4, frameSize: 16, basic: true },
         };
     }
 
@@ -101,6 +126,7 @@ class SpriteManager {
         const ts  = 'assets/Tiny Swords (Free Pack)/Tiny Swords (Free Pack)';
         const ken = 'assets/kenney_tiny-dungeon';
         const cute = 'assets/Cute_Fantasy_Free';
+        const bm = 'assets/Basic_Monster_Animations';
 
         const entries = [
             // ── Player (Blue) ──────────────────────────────────────────────────
@@ -124,6 +150,26 @@ class SpriteManager {
             ['player_phantom', 'assets/sprites/player/player_phantom.png'],
             ['phantom_idle', 'assets/sprites/player/phantom_idle.png'],
             ['adventure_player', 'assets/sprites/player/Adventure_Character_Simple.png'],
+            ['adventure_boy_a', 'assets/sprites/player/Boy_Adventure_A.png'],
+            ['adventure_boy_b', 'assets/sprites/player/Boy_Adventure_B.png'],
+            ['adventure_boy_c', 'assets/sprites/player/Boy_Adventure_C.png'],
+            ['adventure_boy_d', 'assets/sprites/player/Boy_Adventure_D.png'],
+            ['adventure_knight_a', 'assets/sprites/player/Knight_A.png'],
+            ['adventure_knight_b', 'assets/sprites/player/Knight_B.png'],
+            ['adventure_knight_c', 'assets/sprites/player/Knight_C.png'],
+            ['adventure_knight_d', 'assets/sprites/player/Knight_D.png'],
+            ['adventure_knight_e', 'assets/sprites/player/Knight_E.png'],
+            ['adventure_knight_f', 'assets/sprites/player/Knight_F.png'],
+            ['adventure_knight_g', 'assets/sprites/player/Knight_G.png'],
+            ['adventure_knight_h', 'assets/sprites/player/Knight_H.png'],
+            ['adventure_special_knight_1', 'assets/sprites/player/Special_Knight_1.png'],
+            ['adventure_special_knight_2', 'assets/sprites/player/Special_Knight_2.png'],
+            ['adventure_special_knight_3', 'assets/sprites/player/Special_Knight_3.png'],
+            ['adventure_special_knight_4', 'assets/sprites/player/Special_Knight_4.png'],
+            ['adventure_worker_a', 'assets/sprites/player/Worker_A.png'],
+            ['adventure_worker_b', 'assets/sprites/player/Worker_B.png'],
+            ['adventure_worker_c', 'assets/sprites/player/Worker_C.png'],
+            ['adventure_worker_d', 'assets/sprites/player/Worker_D.png'],
 
             // ── Enemy sprites ──────────────────────────────────────────────────
             // Red Pawn  → grunt, poisonFrog
@@ -167,6 +213,22 @@ class SpriteManager {
             ['e_yel_pawn_run',     `${ts}/Units/Yellow Units/Pawn/Pawn_Run.png`],
 
             // ── Fallback enemy tilemap (kept for backwards compat) ─────────────
+            ['bm_blinded_grimlock', `${bm}/BlindedGrimlock.png`],
+            ['bm_bloodshot_eye', `${bm}/BloodshotEye.png`],
+            ['bm_brawny_ogre', `${bm}/BrawnyOgre.png`],
+            ['bm_crimson_slaad', `${bm}/CrimsonSlaad.png`],
+            ['bm_crushing_cyclops', `${bm}/CrushingCyclops.png`],
+            ['bm_death_slime', `${bm}/DeathSlime.png`],
+            ['bm_fungal_myconid', `${bm}/FungalMyconid.png`],
+            ['bm_humongous_ettin', `${bm}/HumongousEttin.png`],
+            ['bm_murky_slaad', `${bm}/MurkySlaad.png`],
+            ['bm_ochre_jelly', `${bm}/OchreJelly.png`],
+            ['bm_ocular_watcher', `${bm}/OcularWatcher.png`],
+            ['bm_red_cap', `${bm}/RedCap.png`],
+            ['bm_shrieker_mushroom', `${bm}/ShriekerMushroom.png`],
+            ['bm_stone_troll', `${bm}/StoneTroll.png`],
+            ['bm_swamp_troll', `${bm}/SwampTroll.png`],
+
             ['dungeon_chars',   `${ken}/Tilemap/tilemap_packed.png`],
 
             // ── Buildings ─────────────────────────────────────────────────────
@@ -265,17 +327,30 @@ class SpriteManager {
         return true;
     }
 
-    drawAdventurePlayerFrame(ctx, animKey, frame, drawSize, flipX = false) {
+    getRandomPlayerSpriteKey() {
+        const available = this.playerSpriteKeys.filter(key => this.sprites[key]);
+        const keys = available.length ? available : this.playerSpriteKeys;
+        return keys[Math.floor(Math.random() * keys.length)] || 'adventure_player';
+    }
+
+    normalizePlayerSpriteKey(spriteKey) {
+        return this.playerSpriteKeys.includes(spriteKey) ? spriteKey : 'adventure_player';
+    }
+
+    drawAdventurePlayerFrame(ctx, animKey, frame, drawSize, flipX = false, spriteKey = null) {
         const anim = this.playerAnims[animKey];
         if (!anim) return false;
-        const img = this.sprites[anim.key];
+        const requestedKey = this.normalizePlayerSpriteKey(spriteKey || anim.key);
+        const img = this.sprites[requestedKey] || this.sprites[anim.key];
         if (!img) return false;
 
         const fw = 48;
         const fh = 48;
         const actualFrame = frame % anim.frames;
         const sx = actualFrame * fw;
-        const sy = anim.row * fh;
+        const sheetH = img.naturalHeight || img.height || 0;
+        const requestedY = anim.row * fh;
+        const sy = requestedY + fh <= sheetH ? requestedY : 0;
 
         ctx.save();
         ctx.imageSmoothingEnabled = false;
@@ -564,14 +639,19 @@ class SpriteManager {
         const img    = this.sprites[key];
         if (!img) return false;
 
-        const fw = this.UNIT_FRAME;
+        const fw = def.frameSize || this.UNIT_FRAME;
         const sx = (frame % frames) * fw;
 
         ctx.save();
+        ctx.imageSmoothingEnabled = false;
         if (flipX) { ctx.scale(-1, 1); }
         ctx.drawImage(img, sx, 0, fw, fw, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
         ctx.restore();
         return true;
+    }
+
+    isBasicMonsterEnemy(enemyType) {
+        return !!this.enemyAnims[enemyType]?.basic;
     }
 
     /**

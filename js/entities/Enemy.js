@@ -399,7 +399,7 @@ export class Enemy extends Entity {
         this._animState  = 'idle';  // 'idle' | 'run'
         this._animFrame  = 0;
         this._animTimer  = 0;
-        this._animFPS    = 8;       // frames per second
+        this._animFPS    = 4;       // frames per second
         this._facingLeft = false;
 
         // Bow special effect tracking
@@ -706,6 +706,18 @@ export class Enemy extends Entity {
         const crystal = this.getAssignedCrystal();
         const directive = this.getDirectiveMultipliers();
         const candidates = [];
+        const playerValid = this.isTargetValid(player);
+        const playerAggroRange = Math.max(170, Math.min(this.visionRange, 320));
+        const playerIsImmediateThreat = playerValid && (
+            distToPlayer <= playerAggroRange ||
+            this.lastThreatSource === player ||
+            (this.target === player && distToPlayer <= this.visionRange * 1.4)
+        );
+
+        if (playerIsImmediateThreat) {
+            this.isAggro = true;
+        }
+
         if (crystal && !crystal.destroyed && crystal.health > 0) {
             const crystalCategory = this.classifyTarget(crystal);
             candidates.push({
@@ -714,7 +726,7 @@ export class Enemy extends Entity {
             });
         }
 
-        const playerInRange = distToPlayer <= this.visionRange * 1.2;
+        const playerInRange = playerValid && distToPlayer <= this.visionRange * 1.2;
         if (playerInRange || this.aiProfile.weights.player >= 1.15 || this.lastThreatSource === player) {
             const playerCategory = this.classifyTarget(player);
             candidates.push({
@@ -723,7 +735,12 @@ export class Enemy extends Entity {
             });
         }
 
-        // Crystal-first rule:
+        if (playerIsImmediateThreat && this.target !== player) {
+            this.target = player;
+            this.retargetLockTimer = Utils.randomFloat(0.25, 0.55);
+            return;
+        }
+
         // Buildings are no longer selected as primary targets. Enemies can still
         // attack true blockers (walls/doors/barricades) in moveTowardsTarget().
 
@@ -903,16 +920,18 @@ export class Enemy extends Entity {
         if (keepCurrent) score += 6;
 
         if (target === this.lastThreatSource && this.lastThreatTimer > 0) {
-            score += 24 * this.aiProfile.vengeance * (this.lastThreatTimer / 4);
+            score += 70 * this.aiProfile.vengeance * Math.min(1, this.lastThreatTimer / 3);
         }
 
         if (category === 'player') {
             const hpRatio = this.game.player.health / Math.max(1, this.game.player.maxHealth);
             score += (1 - hpRatio) * 20;
+            if (dist < 320) score += (320 - dist) * 0.55;
+            if (dist < 170) score += 52;
         } else if (category === 'crystal') {
             // Crystal is always the primary objective — large flat bonus that
             // cannot be overcome by the proximity bonus of nearby buildings.
-            score += 160;
+            score += 70;
         } else if (category === 'turret') {
             score += (target.level || 1) * 6;
             score += (target.damage || 10) * 0.35;
@@ -2037,7 +2056,7 @@ export class Enemy extends Entity {
 
         // Sprite size: bosses drawn larger
         const baseSize = Math.max(this.width, this.height);
-        const spriteSize = this.isBoss ? baseSize * 4 : baseSize * 3;
+        const spriteSize = (this.isBoss ? baseSize * 4 : baseSize * 3) * 0.75;
 
         // Try animated Tiny Swords sprite first
         const drawn = spriteManager.drawEnemyFrame(
@@ -2049,23 +2068,26 @@ export class Enemy extends Entity {
             if (this.flashTimer > 0) {
                 ctx.globalCompositeOperation = 'source-atop';
                 ctx.globalAlpha = 0.55;
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(-spriteSize / 2, -spriteSize / 2, spriteSize, spriteSize);
+                spriteManager.drawEnemyFrame(
+                    ctx, this.enemyType, this._animState, this._animFrame, spriteSize, this._facingLeft
+                );
                 ctx.globalCompositeOperation = 'source-over';
                 ctx.globalAlpha = 1;
             }
 
-            // Subtle per-type signature overlay so shared sprite sheets remain readable.
-            ctx.save();
-            ctx.globalAlpha = 0.78;
-            this.renderEnemyTypeSignature(
-                ctx,
-                this.enemyType,
-                this.getEnemyAccentColor(this.enemyType),
-                this.darkenColor(this.color),
-                Math.max(0.6, spriteSize / 84)
-            );
-            ctx.restore();
+            if (!spriteManager.isBasicMonsterEnemy?.(this.enemyType)) {
+                // Subtle per-type signature overlay so shared fallback sprite sheets remain readable.
+                ctx.save();
+                ctx.globalAlpha = 0.78;
+                this.renderEnemyTypeSignature(
+                    ctx,
+                    this.enemyType,
+                    this.getEnemyAccentColor(this.enemyType),
+                    this.darkenColor(this.color),
+                    Math.max(0.6, spriteSize / 84)
+                );
+                ctx.restore();
+            }
         } else {
             // Fallback to coherent top-down monster silhouettes. Never use pure
             // prototype triangles: they break the production feel immediately.
