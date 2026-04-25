@@ -302,9 +302,20 @@ export class NetworkManager {
                 if (this.isHost) game.requestSkipToNight(msg._from ?? null);
                 break;
 
+            case 'SKIP_TO_NIGHT_VOTE_STATE':
+                game.applySkipToNightVoteState?.(msg);
+                break;
+
             case 'GAME_START':
                 if (!this.isHost && game.state !== 'playing') {
-                    game.startNetworkGame(msg.seed, { gameMode: msg.gameMode });
+                    const versusState = msg.versusState ?? null;
+                    game.startNetworkGame(msg.seed, { gameMode: msg.gameMode, ...(versusState || {}) });
+                }
+                break;
+
+            case 'VERSUS_MATCH_STATE':
+                if (!this.isHost) {
+                    game.applyVersusMatchState?.(msg);
                 }
                 break;
 
@@ -774,29 +785,39 @@ export class NetworkManager {
         });
     }
 
+    _buildVersusMatchStatePayload() {
+        return this.game.getVersusMatchSnapshot?.() ?? null;
+    }
+
     // ── Host broadcasts start ─────────────────────────────────────────────────
 
     broadcastStart() {
         if (!this.isHost) return;
+        const versusState = this._buildVersusMatchStatePayload();
         this._relayAll({
             type: 'GAME_START',
             seed: this.game._worldSeed,
-            gameMode: this.game.gameMode
+            gameMode: this.game.gameMode,
+            versusState
         });
     }
 
     broadcastFullState() {
         if (!this.isHost || !this.ready || !this.inRoom || this.game.state !== 'playing') return;
+        const versusState = this._buildVersusMatchStatePayload();
         this._relayAll({
             type: 'GAME_START',
             seed: this.game._worldSeed,
-            gameMode: this.game.gameMode
+            gameMode: this.game.gameMode,
+            versusState
         });
         this._sendEnemyResync();
         this._sendCrystalHP();
         this._sendDayNight();
         this.broadcastWaveUpdate(this.game.waveSystem?.currentWave ?? 0, this.game.waveSystem?.isWaveActive ?? false);
         this.broadcastBuildingResync();
+        this.broadcastVersusMatchState();
+        this.broadcastSkipToNightVoteState();
         // Sync crystal upgrade state to all clients
         const upSys = this.game.crystalUpgradeSystem;
         if (upSys) {
@@ -806,6 +827,24 @@ export class NetworkManager {
 
     broadcastWorldSeed(seed) {
         // Seed is already included in broadcastStart — this is a no-op kept for API compat.
+    }
+
+    broadcastVersusMatchState() {
+        if (!this.isHost || !this.ready || !this.inRoom) return;
+        const payload = this._buildVersusMatchStatePayload();
+        if (!payload) return;
+        this._relayAll({ type: 'VERSUS_MATCH_STATE', ...payload });
+    }
+
+    broadcastSkipToNightVoteState() {
+        if (!this.isHost || !this.ready || !this.inRoom) return;
+        const status = this.game.getSkipToNightVoteStatus?.();
+        if (!status) return;
+        this._relayAll({
+            type: 'SKIP_TO_NIGHT_VOTE_STATE',
+            voterIds: status.voterIds,
+            requiredIds: status.requiredIds
+        });
     }
 
     // ── Wave sync (host → client) ─────────────────────────────────────────────

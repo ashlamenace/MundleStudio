@@ -46,6 +46,13 @@
                         <span class="bar-text" id="crystal-health-text">500/500</span>
                     </div>
                 </div>
+                <div id="versus-status" class="hidden">
+                    <div class="versus-status-header">
+                        <span class="versus-title">VERSUS</span>
+                        <span id="versus-alive-count" class="versus-alive-count">0/0</span>
+                    </div>
+                    <div id="versus-status-list" class="versus-status-list"></div>
+                </div>
             </div>
 
             <!-- Top Right: Resources -->
@@ -359,6 +366,10 @@
             <div class="game-over-content">
                 <h1>GAME OVER</h1>
                 <p id="survival-time">Vous avez survécu 0 jours</p>
+                <div id="versus-gameover-summary" class="hidden">
+                    <h2>État du match</h2>
+                    <div id="versus-gameover-list"></div>
+                </div>
                 <div id="prestige-info">
                     <p>Prestige bonus: <span id="prestige-bonus">0%</span></p>
                     <p>Ressources conservées au prochain run</p>

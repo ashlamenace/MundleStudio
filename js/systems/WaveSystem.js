@@ -577,7 +577,8 @@ export class WaveSystem {
         const edgeInset = 56;
         const radiusX = Math.max(96, shape.radiusX - edgeInset);
         const radiusY = Math.max(96, shape.radiusY - edgeInset);
-        const side = Utils.randomInt(0, 3);
+        const sideOptions = this.getVersusSpawnSides(island);
+        const side = sideOptions[Utils.randomInt(0, sideOptions.length - 1)];
         const offset = Utils.randomFloat(-0.6, 0.6);
 
         if (side === 0 || side === 2) {
@@ -595,6 +596,20 @@ export class WaveSystem {
             x: shape.centerX + (side === 1 ? xNorm : -xNorm) * radiusX,
             y: shape.centerY + yNorm * radiusY
         };
+    }
+
+    getVersusSpawnSides(island) {
+        const allSides = [0, 1, 2, 3];
+        const blockedBySlot = {
+            north: [1, 3],
+            south: [1, 3],
+            east: [0, 2],
+            west: [0, 2]
+        };
+
+        const blocked = blockedBySlot[island?.slot] ?? [];
+        const allowed = allSides.filter(side => !blocked.includes(side));
+        return allowed.length > 0 ? allowed : allSides;
     }
 
     /**

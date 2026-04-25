@@ -57,6 +57,8 @@ Le principe cible est :
 - PvP fonctionnel et degats sur les batiments ennemis
 - defense autoritative cote proprietaire pour garder la synchro reseau
 - metadata de projectile propagee pour resoudre les hits cote reseau
+- retargeting des ennemis vers un cristal vivant quand une base tombe
+- spawn des ennemis evite les bords relies aux ponts
 
 ### Economie / ressources
 
@@ -72,25 +74,30 @@ Le principe cible est :
   - upgrades joueur moins chers
 - correction de progression : le palier cristal 2 (niveau joueur) debloque bien l'etabli
 
+### Reseau / etat de partie
+
+- synchronisation des slots actifs et elimines
+- resync des cristaux actifs dans les paquets de match
+
+### Interface
+
+- panneau HUD pour l'etat des cristaux (slots restants)
+- recapitulatif de fin de match cote versus
+
 ## Ce qui reste a faire
 
 ### Vagues et IA
 
 - verifier qu'une vague complete existe bien par ile encore vivante sur host et clients
-- affiner la cible des ennemis pour les matchs a plusieurs fronts
-- equilibrer les points de spawn pour eviter les apparitions trop proches des ponts
+- verifier le tempo des vagues lors des matchs a plusieurs fronts
 
 ### Reseau / etat de partie
 
-- synchroniser explicitement les joueurs elimines
 - gerer proprement les cas de reconnexion ou resync tardif
-- assurer que tous les clients ont exactement la meme liste de cristaux actifs
 
 ### Interface
 
-- afficher clairement les joueurs encore en vie
-- afficher l'etat de chaque cristal en versus
-- ajouter un vrai ecran de victoire / elimination propre au mode
+- ajuster la presentation finale (titres, textes, couleurs) apres playtests
 
 ### Equilibrage
 

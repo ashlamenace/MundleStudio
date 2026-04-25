@@ -10,7 +10,7 @@ import { Utils } from './Utils.js';
 import { spriteManager } from './SpriteManager.js';
 import { VisualEffects } from './VisualEffects.js';
 import { World } from '../world/World.js';
-import { VERSUS_SLOT_ORDER, resolveVersusSlot } from '../world/VersusArena.js';
+import { VERSUS_SLOT_COLORS, VERSUS_SLOT_LABELS, VERSUS_SLOT_ORDER, resolveVersusSlot } from '../world/VersusArena.js';
 import { Cave } from '../world/Cave.js';
 import { DayNightCycle } from '../world/DayNightCycle.js';
 import { Player } from '../entities/Player.js';
@@ -24,6 +24,7 @@ import { CollisionSystem } from '../systems/CollisionSystem.js';
 import { HUD } from '../ui/HUD.js';
 import { Minimap } from '../ui/Minimap.js';
 import { BuildMenu } from '../ui/BuildMenu.js';
+import { VersusStatus } from '../ui/VersusStatus.js';
 import { AudioSystem } from '../systems/AudioSystem.js';
 import { EventSystem } from '../systems/EventSystem.js';
 import { ArtifactSystem } from '../systems/ArtifactSystem.js';
@@ -79,6 +80,10 @@ export class Game {
         this.gameModeConfig = getGameModeConfig(this.gameMode);
         this.matchState = createMatchState(this.gameMode);
         this.playerSlot = null;
+        this.skipToNightVoteState = {
+            voterIds: new Set(),
+            requiredIds: []
+        };
 
         // Initialize core systems
         this.input = new Input(canvas);
@@ -100,6 +105,7 @@ export class Game {
         this.survivalTimeEl = document.getElementById('survival-time');
         this.prestigeBonusEl = document.getElementById('prestige-bonus');
         this.prestigeInfoEl = document.getElementById('prestige-info');
+        this.versusStatus = null;
         this.crystals = new Map();
 
         // Dev mode UI
@@ -114,6 +120,7 @@ export class Game {
         this.gameMode = normalizeGameMode(mode);
         this.gameModeConfig = getGameModeConfig(this.gameMode);
         this.matchState = createMatchState(this.gameMode);
+        this.resetSkipToNightVotes();
     }
 
     getModeRules() {
@@ -139,8 +146,32 @@ export class Game {
             .map(crystal => crystal.ownerSlot);
     }
 
+    getClosestAliveCrystal(origin = null) {
+        const alive = this.getAllCrystals()
+            .filter(crystal => crystal && !crystal.destroyed && crystal.health > 0);
+        if (alive.length === 0) return this.getLocalCrystal();
+        if (!origin) return alive[0];
+
+        let best = alive[0];
+        let bestDist = Utils.distance(origin.x, origin.y, best.x, best.y);
+        for (let i = 1; i < alive.length; i++) {
+            const candidate = alive[i];
+            const dist = Utils.distance(origin.x, origin.y, candidate.x, candidate.y);
+            if (dist < bestDist) {
+                best = candidate;
+                bestDist = dist;
+            }
+        }
+        return best;
+    }
+
     getActiveVersusSlots() {
         if (this.gameMode !== GameMode.VERSUS_FFA) return [];
+
+        const configuredSlots = this.matchState?.activeSlots;
+        if (Array.isArray(configuredSlots) && configuredSlots.length > 0) {
+            return [...configuredSlots];
+        }
 
         const participantIds = new Set();
         const localId = this.networkManager?.playerId ?? null;
@@ -167,6 +198,59 @@ export class Game {
     resolvePlayerSlot(playerId = null) {
         if (this.gameMode !== GameMode.VERSUS_FFA) return null;
         return resolveVersusSlot(playerId ?? this.networkManager?.playerId ?? null);
+    }
+
+    getVersusMatchSnapshot() {
+        if (this.gameMode !== GameMode.VERSUS_FFA) return null;
+        return {
+            activeSlots: this.getActiveVersusSlots(),
+            eliminatedSlots: [...(this.matchState?.eliminatedSlots ?? [])],
+            matchEnded: !!this.matchState?.matchEnded,
+            winnerSlot: this.matchState?.winnerSlot ?? null
+        };
+    }
+
+    applyVersusMatchState(state = {}) {
+        if (this.gameMode !== GameMode.VERSUS_FFA || !state) return;
+
+        if (Array.isArray(state.activeSlots) && state.activeSlots.length > 0) {
+            const normalizedSlots = state.activeSlots
+                .map(slot => String(slot))
+                .filter(slot => VERSUS_SLOT_ORDER.includes(slot));
+            if (normalizedSlots.length > 0) {
+                this.matchState.activeSlots = [...new Set(normalizedSlots)]
+                    .sort((a, b) => VERSUS_SLOT_ORDER.indexOf(a) - VERSUS_SLOT_ORDER.indexOf(b));
+                this.ensureVersusCrystals(this.matchState.activeSlots);
+            }
+        }
+
+        if (Array.isArray(state.eliminatedSlots)) {
+            const incoming = state.eliminatedSlots
+                .map(slot => String(slot))
+                .filter(slot => VERSUS_SLOT_ORDER.includes(slot));
+            for (const slot of incoming) {
+                if (this.matchState.eliminatedSlots.has(slot)) continue;
+                const crystal = this.getCrystalForSlot(slot);
+                if (crystal) {
+                    this.handleCrystalDestroyed(crystal);
+                } else {
+                    this.matchState.eliminatedSlots.add(slot);
+                }
+            }
+        }
+
+        if (typeof state.matchEnded === 'boolean') {
+            this.matchState.matchEnded = state.matchEnded;
+        }
+        if (state.winnerSlot !== undefined) {
+            this.matchState.winnerSlot = state.winnerSlot;
+        }
+
+        if (this.matchState.matchEnded) {
+            this.applyVersusMatchOutcome();
+        } else {
+            this.evaluateVersusVictoryState();
+        }
     }
 
     canPlayerBuildAt(worldX, worldY, playerId = null) {
@@ -197,6 +281,102 @@ export class Game {
     isSlotEliminated(slot) {
         if (!slot) return false;
         return this.matchState?.eliminatedSlots?.has(slot) ?? false;
+    }
+
+    getNightSkipEligiblePlayerIds() {
+        if (!this.networkManager?.inRoom) return ['local'];
+
+        const ids = new Set();
+        const localId = this.networkManager?.playerId ?? null;
+        if (localId) ids.add(localId);
+
+        for (const id of this._remotePlayers?.keys?.() ?? []) {
+            ids.add(id);
+        }
+
+        for (const id of this._pendingRemotePlayers ?? []) {
+            ids.add(id);
+        }
+
+        for (const id of this._pendingRemotePlayerStates?.keys?.() ?? []) {
+            ids.add(id);
+        }
+
+        let eligibleIds = [...ids];
+        if (this.gameMode === GameMode.VERSUS_FFA) {
+            eligibleIds = eligibleIds.filter((id) => {
+                const slot = this.resolvePlayerSlot(id);
+                return slot && VERSUS_SLOT_ORDER.includes(slot) && !this.isSlotEliminated(slot);
+            });
+        }
+
+        return eligibleIds.sort((a, b) => {
+            const aIndex = VERSUS_SLOT_ORDER.indexOf(this.resolvePlayerSlot(a));
+            const bIndex = VERSUS_SLOT_ORDER.indexOf(this.resolvePlayerSlot(b));
+            if (aIndex !== bIndex) return aIndex - bIndex;
+            return String(a).localeCompare(String(b));
+        });
+    }
+
+    getSkipToNightVoteStatus() {
+        const requiredIds = this.skipToNightVoteState?.requiredIds?.length
+            ? this.skipToNightVoteState.requiredIds
+            : this.getNightSkipEligiblePlayerIds();
+        const voterIds = this.skipToNightVoteState?.voterIds ?? new Set();
+        const localId = this.networkManager?.playerId ?? 'local';
+
+        return {
+            votes: voterIds.size,
+            required: Math.max(1, requiredIds.length),
+            hasLocalVote: voterIds.has(localId),
+            voterIds: [...voterIds],
+            requiredIds: [...requiredIds]
+        };
+    }
+
+    applySkipToNightVoteState(state = {}) {
+        const requiredIds = Array.isArray(state.requiredIds)
+            ? state.requiredIds.map(id => String(id))
+            : [];
+        const voterIds = Array.isArray(state.voterIds)
+            ? state.voterIds.map(id => String(id))
+            : [];
+
+        this.skipToNightVoteState = {
+            requiredIds,
+            voterIds: new Set(voterIds)
+        };
+    }
+
+    resetSkipToNightVotes({ broadcast = false } = {}) {
+        this.skipToNightVoteState = {
+            voterIds: new Set(),
+            requiredIds: this.getNightSkipEligiblePlayerIds?.() ?? []
+        };
+        if (broadcast) {
+            this.networkManager?.broadcastSkipToNightVoteState?.();
+        }
+    }
+
+    refreshSkipToNightVotes() {
+        if (!this.networkManager?.inRoom || !this.networkManager?.isHost) return;
+        if (!this.dayNight || this.dayNight.isNight) {
+            this.resetSkipToNightVotes({ broadcast: true });
+            return;
+        }
+
+        const requiredIds = this.getNightSkipEligiblePlayerIds();
+        const requiredSet = new Set(requiredIds);
+        this.skipToNightVoteState.requiredIds = requiredIds;
+        this.skipToNightVoteState.voterIds = new Set(
+            [...(this.skipToNightVoteState.voterIds ?? [])].filter(id => requiredSet.has(id))
+        );
+
+        this.networkManager?.broadcastSkipToNightVoteState?.();
+
+        if (requiredIds.length > 0 && requiredIds.every(id => this.skipToNightVoteState.voterIds.has(id))) {
+            this._forceSkipToNight({ viaVote: true });
+        }
     }
 
     getHostileRemotePlayersFor(ownerId = null) {
@@ -577,6 +757,7 @@ export class Game {
         }
 
         this.networkManager?.broadcastFullState?.();
+        this.resetSkipToNightVotes({ broadcast: !!this.networkManager?.inRoom && !!this.networkManager?.isHost });
     }
 
     requestSkipToNight(requestedBy = null) {
@@ -591,6 +772,16 @@ export class Game {
         const inRoom = !!this.networkManager?.inRoom;
         const isHost = !!this.networkManager?.isHost;
         const requesterId = requestedBy ?? this.networkManager?.playerId ?? 'local';
+
+        if (!inRoom) {
+            return this._forceSkipToNight({ requestedBy: requesterId });
+        }
+
+        if (isHost) {
+            return this.registerSkipToNightVote(requesterId, { showLocalFeedback: requestedBy === null });
+        }
+
+        if (requestedBy !== null) return false;
 
         if (this.dayNight.isNight) {
             if (requestedBy === null) {
@@ -631,8 +822,65 @@ export class Game {
         return true;
     }
 
+    registerSkipToNightVote(voterId, { showLocalFeedback = false } = {}) {
+        if (!this.dayNight || !this.waveSystem || this.dayNight.isNight) return false;
+
+        const voter = String(voterId ?? this.networkManager?.playerId ?? 'local');
+        const requiredIds = this.getNightSkipEligiblePlayerIds();
+        if (!requiredIds.includes(voter)) return false;
+
+        this.skipToNightVoteState.requiredIds = requiredIds;
+        this.skipToNightVoteState.voterIds.add(voter);
+
+        const approved = requiredIds.every(id => this.skipToNightVoteState.voterIds.has(id));
+        this.networkManager?.broadcastSkipToNightVoteState?.();
+
+        if (approved) {
+            return this._forceSkipToNight({ requestedBy: voter, viaVote: true });
+        }
+
+        const votes = this.skipToNightVoteState.voterIds.size;
+        const required = requiredIds.length;
+        if (showLocalFeedback) {
+            this.showNotification('Vote enregistre', `${votes}/${required} joueurs veulent passer a la nuit.`, '#66d9ff', 1.8);
+        } else if (this.networkManager?.isHost) {
+            this.showNotification('Vote de nuit', `${voter} a vote (${votes}/${required}).`, '#66d9ff', 1.4);
+        }
+
+        return true;
+    }
+
+    _forceSkipToNight({ requestedBy = null, viaVote = false } = {}) {
+        if (!this.dayNight || !this.waveSystem || this.dayNight.isNight) return false;
+
+        this.dayNight.currentTime = this.dayNight.dayDuration;
+        this.dayNight.isNight = true;
+        this.dayNight.justBecameNight = true;
+        this.dayNight.justBecameDay = false;
+        this.dayNight.updateOverlay();
+
+        this._startNightWave();
+
+        this.resetSkipToNightVotes({ broadcast: !!this.networkManager?.inRoom && !!this.networkManager?.isHost });
+
+        if (this.networkManager?.inRoom) {
+            this.networkManager?.broadcastFullState?.();
+        }
+
+        if (viaVote) {
+            this.showNotification('Vote accepte', 'Tous les joueurs ont vote pour la nuit.', '#66d9ff', 1.6);
+        } else if (requestedBy === null || requestedBy === (this.networkManager?.playerId ?? requestedBy)) {
+            this.showNotification('Nuit avancee', 'La vague commence immediatement.', '#ff9966', 1.6);
+        } else if (this.networkManager?.isHost) {
+            this.showNotification('Nuit demandee', `${requestedBy} a lance la nuit.`, '#66d9ff', 1.6);
+        }
+
+        return true;
+    }
+
     _startNightWave() {
         if (!this.waveSystem || !this.dayNight?.isNight) return;
+        this.resetSkipToNightVotes({ broadcast: !!this.networkManager?.inRoom && !!this.networkManager?.isHost });
 
         if (!this.waveSystem.isWaveActive) {
             this.waveSystem.startWave();
@@ -643,6 +891,7 @@ export class Game {
     }
 
     _handleDayStart() {
+        this.resetSkipToNightVotes({ broadcast: !!this.networkManager?.inRoom && !!this.networkManager?.isHost });
         this.objectiveSystem?.onNewDay(this.survivalDays);
         this.networkManager?.broadcastWaveUpdate(this.waveSystem?.currentWave ?? 0, false);
     }
@@ -779,42 +1028,50 @@ export class Game {
         this.hud = new HUD(this);
         this.minimap = new Minimap(this);
         this.buildMenu = new BuildMenu(this);
+        this.versusStatus = new VersusStatus(this);
 
         // Reset survival days
         this.survivalDays = 0;
         console.log('[GAME] Initialization complete!');
     }
 
+    _spawnVersusCrystal(slot) {
+        if (!slot || this.crystals.has(slot)) return null;
+        const point = this.world?.getCrystalPointForSlot(slot);
+        if (!point) return null;
+
+        const crystal = new Crystal(this, point.x, point.y, {
+            ownerSlot: slot,
+            isLocalCrystal: slot === this.playerSlot,
+            color: VERSUS_SLOT_COLORS[slot] ?? null
+        });
+        this.crystals.set(slot, crystal);
+        this.entities.push(crystal);
+
+        if (slot === this.playerSlot) {
+            this.crystal = crystal;
+        }
+
+        return crystal;
+    }
+
+    ensureVersusCrystals(activeSlots = this.getActiveVersusSlots()) {
+        if (!this.world?.arenaData?.slots) return;
+        if (!Array.isArray(activeSlots) || activeSlots.length === 0) return;
+
+        for (const slot of activeSlots) {
+            this._spawnVersusCrystal(slot);
+        }
+
+        if (!this.crystal) {
+            this.crystal = this.crystals.get(this.playerSlot) ?? this.crystals.get(activeSlots[0]) ?? null;
+        }
+    }
+
     _spawnCrystals() {
         if (this.gameMode === GameMode.VERSUS_FFA && this.world?.arenaData?.slots) {
-            const crystalColors = {
-                north: '#7dd3fc',
-                east: '#fca5a5',
-                south: '#86efac',
-                west: '#fcd34d'
-            };
-
             const activeSlots = this.getActiveVersusSlots();
-            for (const slot of activeSlots) {
-                const point = this.world.getCrystalPointForSlot(slot);
-                if (!point) continue;
-
-                const crystal = new Crystal(this, point.x, point.y, {
-                    ownerSlot: slot,
-                    isLocalCrystal: slot === this.playerSlot,
-                    color: crystalColors[slot] ?? null
-                });
-                this.crystals.set(slot, crystal);
-                this.entities.push(crystal);
-
-                if (slot === this.playerSlot) {
-                    this.crystal = crystal;
-                }
-            }
-
-            if (!this.crystal) {
-                this.crystal = this.crystals.get(this.playerSlot) ?? this.crystals.get(activeSlots[0]) ?? null;
-            }
+            this.ensureVersusCrystals(activeSlots);
             return;
         }
 
@@ -869,6 +1126,9 @@ export class Game {
         const options = this._normalizeStartOptions(devModeOrOptions, maybeOptions);
         this.devMode = options.devMode;
         this.setGameMode(options.gameMode);
+        if (this.gameMode === GameMode.VERSUS_FFA) {
+            this.matchState.activeSlots = this.getActiveVersusSlots();
+        }
         this.startScreen?.classList.add('hidden');
         this.gameOverScreen?.classList.add('hidden');
         document.getElementById('lobby-screen')?.classList.add('hidden');
@@ -921,6 +1181,15 @@ export class Game {
         document.getElementById('lobby-screen')?.classList.add('hidden');
         this.startScreen?.classList.add('hidden');
         this.setGameMode(options?.gameMode ?? this.gameMode);
+        if (this.gameMode === GameMode.VERSUS_FFA && Array.isArray(options?.activeSlots)) {
+            const normalizedSlots = options.activeSlots
+                .map(slot => String(slot))
+                .filter(slot => VERSUS_SLOT_ORDER.includes(slot));
+            if (normalizedSlots.length > 0) {
+                this.matchState.activeSlots = [...new Set(normalizedSlots)]
+                    .sort((a, b) => VERSUS_SLOT_ORDER.indexOf(a) - VERSUS_SLOT_ORDER.indexOf(b));
+            }
+        }
         Utils.seed(seed ?? Date.now());
         this.init();
 
@@ -928,6 +1197,9 @@ export class Game {
         if (this.waveSystem) this.waveSystem._networkClient = true;
 
         this.state = 'playing';
+        if (options && this.gameMode === GameMode.VERSUS_FFA) {
+            this.applyVersusMatchState(options);
+        }
         if (!this.running) {
             this.running  = true;
             this.lastTime = performance.now();
@@ -964,6 +1236,7 @@ export class Game {
         this._remotePlayers.set(id, rp);
 
         this._onLobbyPlayerJoined?.(id);
+        this.refreshSkipToNightVotes();
     }
 
     removeRemotePlayer(id) {
@@ -973,6 +1246,7 @@ export class Game {
             this._pendingRemotePlayers = this._pendingRemotePlayers.filter(pid => pid !== id);
         }
         this._onLobbyPlayerLeft?.(id);
+        this.refreshSkipToNightVotes();
     }
 
     updateRemotePlayer(id, data) {
@@ -1041,6 +1315,11 @@ export class Game {
             this.prestigeBonusEl.textContent = `${Math.min(50, this.survivalDays * 2)}%`;
         }
 
+        this._updateVersusGameOverSummary(reason);
+        if (this.versusStatus?.container) {
+            this.versusStatus.container.classList.add('hidden');
+        }
+
         this.gameOverScreen.classList.remove('hidden');
     }
 
@@ -1060,12 +1339,62 @@ export class Game {
         return `Vous avez survécu ${this.survivalDays} jours`;
     }
 
+    _updateVersusGameOverSummary(reason) {
+        const summary = document.getElementById('versus-gameover-summary');
+        const list = document.getElementById('versus-gameover-list');
+        if (!summary || !list) return;
+
+        if (this.gameMode !== GameMode.VERSUS_FFA) {
+            summary.classList.add('hidden');
+            return;
+        }
+
+        const activeSlots = this.getActiveVersusSlots();
+        if (activeSlots.length === 0) {
+            summary.classList.add('hidden');
+            return;
+        }
+
+        summary.classList.remove('hidden');
+        list.innerHTML = '';
+
+        const winnerSlot = this.matchState?.winnerSlot ?? null;
+
+        for (const slot of activeSlots) {
+            const row = document.createElement('div');
+            row.className = 'versus-gameover-row';
+
+            const name = document.createElement('span');
+            name.className = 'slot-name';
+            name.textContent = VERSUS_SLOT_LABELS[slot] ?? slot.toUpperCase();
+
+            const status = document.createElement('span');
+            status.className = 'slot-status';
+
+            if (winnerSlot && slot === winnerSlot) {
+                row.classList.add('winner');
+                status.textContent = 'VICTOIRE';
+            } else if (this.isSlotEliminated(slot)) {
+                row.classList.add('eliminated');
+                status.textContent = 'ELIMINE';
+            } else {
+                status.textContent = 'EN VIE';
+            }
+
+            row.appendChild(name);
+            row.appendChild(status);
+            list.appendChild(row);
+        }
+    }
+
     evaluateVersusVictoryState() {
         if (this.gameMode !== GameMode.VERSUS_FFA || this.state !== 'playing') return;
         if (this.matchState.matchEnded) return;
 
         const activeSlots = this.getActiveVersusSlots();
         if (activeSlots.length === 0) return;
+        if (activeSlots.length === 1) return;
+        if (this.getActivePlayerCount() <= 1) return;
 
         const aliveSlots = activeSlots.filter((slot) => !this.isSlotEliminated(slot));
         if (aliveSlots.length > 1) return;
@@ -1074,6 +1403,18 @@ export class Game {
         this.matchState.matchEnded = true;
         this.matchState.winnerSlot = winnerSlot;
 
+        if (this.networkManager?.inRoom && this.networkManager?.isHost) {
+            this.networkManager.broadcastVersusMatchState?.();
+        }
+
+        this.applyVersusMatchOutcome();
+    }
+
+    applyVersusMatchOutcome() {
+        if (this.gameMode !== GameMode.VERSUS_FFA || this.state !== 'playing') return;
+        if (!this.matchState.matchEnded) return;
+
+        const winnerSlot = this.matchState.winnerSlot ?? null;
         if (winnerSlot && winnerSlot === this.playerSlot && !this.matchState.localPlayerEliminated) {
             this.matchState.defeatReason = 'victory';
             this.gameOver({ reason: 'victory' });
@@ -1173,9 +1514,15 @@ export class Game {
         this.matchState.eliminatedSlots.add(slot);
         crystal.triggerDestruction?.();
         crystal.destroyed = true;
+        this.refreshSkipToNightVotes();
 
         if (slot && slot !== this.playerSlot && slot !== 'local') {
-            this.showNotification('Cristal détruit', `${slot.toUpperCase()} est éliminé.`, '#ff8899', 1.8);
+            const label = VERSUS_SLOT_LABELS[slot] ?? slot.toUpperCase();
+            this.showNotification('Cristal détruit', `${label} est éliminé.`, '#ff8899', 1.8);
+        }
+
+        if (this.networkManager?.inRoom && this.networkManager?.isHost) {
+            this.networkManager.broadcastVersusMatchState?.();
         }
 
         if (crystal === this.getLocalCrystal() || slot === this.playerSlot || slot === 'local') {
@@ -1420,6 +1767,7 @@ export class Game {
 
         // Update HUD
         this.hud.update(dt);
+        this.versusStatus?.update(dt);
     }
 
     /**

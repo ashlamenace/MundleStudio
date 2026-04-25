@@ -161,6 +161,87 @@ body {
     text-shadow: 0 0 5px black;
 }
 
+/* Versus status panel */
+#versus-status {
+    background: var(--bg-panel);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: 8px;
+    border: 1px solid var(--border-glow);
+    box-shadow: 0 0 18px rgba(0, 245, 255, 0.15);
+    min-width: 220px;
+}
+
+.versus-status-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--font-display);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.versus-title {
+    font-weight: 700;
+}
+
+.versus-alive-count {
+    font-weight: 700;
+    color: var(--neon-green);
+}
+
+.versus-status-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.versus-slot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.versus-slot-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
+}
+
+.versus-slot-name {
+    font-weight: 700;
+    width: 48px;
+}
+
+.versus-slot-bar {
+    position: relative;
+    flex: 1;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.versus-slot-fill {
+    height: 100%;
+    width: 0%;
+    transition: width 0.2s ease;
+}
+
+.versus-slot-hp {
+    font-size: 10px;
+    min-width: 46px;
+    text-align: right;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.versus-slot.eliminated {
+    opacity: 0.4;
+}
+
 /* Resources Section - Top Right */
 #resources-section {
     position: absolute;
@@ -1142,6 +1223,47 @@ body {
 #restart-button:hover {
     transform: scale(1.05);
     box-shadow: 0 0 30px rgba(0, 245, 255, 0.5);
+}
+
+#versus-gameover-summary {
+    margin-top: var(--spacing-md);
+    padding: var(--spacing-md);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(10, 10, 30, 0.65);
+    text-align: left;
+}
+
+#versus-gameover-summary h2 {
+    font-family: var(--font-display);
+    font-size: 16px;
+    margin-bottom: var(--spacing-sm);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+#versus-gameover-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.versus-gameover-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+}
+
+.versus-gameover-row .slot-name {
+    font-weight: 700;
+}
+
+.versus-gameover-row.eliminated {
+    color: rgba(255, 120, 140, 0.9);
+}
+
+.versus-gameover-row.winner {
+    color: var(--neon-green);
 }
 
 /* ========================================

@@ -59,6 +59,7 @@ export function createMatchState(mode) {
         localCrystalDestroyed: false,
         defeatReason: null,
         eliminatedSlots: new Set(),
+        activeSlots: [],
         matchEnded: false,
         winnerSlot: null
     };

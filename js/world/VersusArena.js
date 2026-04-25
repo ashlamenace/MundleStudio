@@ -1,5 +1,19 @@
 export const VERSUS_SLOT_ORDER = Object.freeze(['north', 'east', 'south', 'west']);
 
+export const VERSUS_SLOT_COLORS = Object.freeze({
+    north: '#7dd3fc',
+    east: '#fca5a5',
+    south: '#86efac',
+    west: '#fcd34d'
+});
+
+export const VERSUS_SLOT_LABELS = Object.freeze({
+    north: 'NORD',
+    east: 'EST',
+    south: 'SUD',
+    west: 'OUEST'
+});
+
 const PLAYER_ISLANDS = Object.freeze({
     north: { id: 'north', gridX: 1, gridY: 0, biome: 'forest', tile: 0, radiusXTiles: 22, radiusYTiles: 22 },
     east:  { id: 'east',  gridX: 2, gridY: 1, biome: 'rocky',  tile: 2, radiusXTiles: 22, radiusYTiles: 22 },

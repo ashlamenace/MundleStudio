@@ -882,7 +882,9 @@ export class Enemy extends Entity {
 
     getAssignedCrystal() {
         if (this.targetCrystalSlot) {
-            return this.game.getCrystalForSlot?.(this.targetCrystalSlot) ?? this.game.crystal;
+            const crystal = this.game.getCrystalForSlot?.(this.targetCrystalSlot) ?? null;
+            if (crystal && !crystal.destroyed && crystal.health > 0) return crystal;
+            return this.game.getClosestAliveCrystal?.(this) ?? this.game.crystal;
         }
         return this.game.crystal;
     }

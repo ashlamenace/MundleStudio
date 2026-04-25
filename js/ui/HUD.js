@@ -85,11 +85,13 @@ export class HUD {
 
         // Crystal health
         if (this.elements.crystalHealthFill) {
-            const crystalPercent = (crystal.health / crystal.maxHealth) * 100;
+            const crystalPercent = crystal ? (crystal.health / crystal.maxHealth) * 100 : 0;
             this.elements.crystalHealthFill.style.width = `${crystalPercent}%`;
         }
         if (this.elements.crystalHealthText) {
-            this.elements.crystalHealthText.textContent = `${Math.floor(crystal.health)}/${crystal.maxHealth}`;
+            this.elements.crystalHealthText.textContent = crystal
+                ? `${Math.floor(crystal.health)}/${crystal.maxHealth}`
+                : '0/0';
         }
     }
 
@@ -147,14 +149,20 @@ export class HUD {
 
         if (skipBtn) {
             const inRoom = !!this.game.networkManager?.inRoom;
-            const isHost = !!this.game.networkManager?.isHost;
             const canSkipNow = !dayNight.isNight && this.game.state === 'playing' && !this.game.inCave;
+            const voteStatus = this.game.getSkipToNightVoteStatus?.();
+            const hasLocalVote = inRoom && !!voteStatus?.hasLocalVote;
+            const votes = voteStatus?.votes ?? 0;
+            const required = voteStatus?.required ?? 1;
 
             skipBtn.classList.toggle('hidden', !canSkipNow);
-            skipBtn.disabled = !canSkipNow;
-            skipBtn.textContent = inRoom && !isHost
+            skipBtn.disabled = !canSkipNow || hasLocalVote;
+            skipBtn.textContent = inRoom
                 ? '⏭️ Demander la nuit'
                 : '⏭️ Passer à la nuit';
+            if (inRoom) {
+                skipBtn.textContent = `Vote nuit (${votes}/${required})`;
+            }
         }
     }
 
