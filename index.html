@@ -30,7 +30,7 @@
 
         <!-- HUD Overlay -->
         <div id="hud">
-            <!-- Top Left: Health Bars -->
+            <!-- Bottom Center: Core Status -->
             <div id="health-section">
                 <div class="health-bar" id="player-health">
                     <span class="health-icon">♥</span>
@@ -40,19 +40,20 @@
                     </div>
                 </div>
                 <div class="health-bar" id="crystal-health">
-                    <span class="health-icon crystal">💎</span>
+                    <span class="health-icon crystal">♦</span>
                     <div class="bar-container crystal">
                         <div class="bar-fill crystal" id="crystal-health-fill"></div>
                         <span class="bar-text" id="crystal-health-text">500/500</span>
                     </div>
                 </div>
-                <div id="versus-status" class="hidden">
-                    <div class="versus-status-header">
-                        <span class="versus-title">VERSUS</span>
-                        <span id="versus-alive-count" class="versus-alive-count">0/0</span>
-                    </div>
-                    <div id="versus-status-list" class="versus-status-list"></div>
+            </div>
+
+            <div id="versus-status" class="hidden">
+                <div class="versus-status-header">
+                    <span class="versus-title">VERSUS</span>
+                    <span id="versus-alive-count" class="versus-alive-count">0/0</span>
                 </div>
+                <div id="versus-status-list" class="versus-status-list"></div>
             </div>
 
             <!-- Top Right: Resources -->

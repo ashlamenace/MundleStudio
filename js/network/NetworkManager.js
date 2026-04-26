@@ -106,11 +106,39 @@ export class NetworkManager {
     }
 
     joinRoom(code) {
+        const normalizedCode = code.toUpperCase().trim();
         return new Promise((resolve, reject) => {
             this._cb.joined = resolve;
             this._cb.error  = reject;
-            this._send({ type: 'JOIN_ROOM', code: code.toUpperCase().trim() });
+            this._send({
+                type: 'JOIN_ROOM',
+                code: normalizedCode,
+                playerId: this._getStoredPlayerId(normalizedCode)
+            });
         });
+    }
+
+    _storageKey(code) {
+        return `crystalGuardian:room:${String(code ?? '').toUpperCase()}:playerId`;
+    }
+
+    _getStoredPlayerId(code) {
+        try {
+            const id = window.localStorage?.getItem(this._storageKey(code));
+            return /^player_[1-4]$/.test(id ?? '') ? id : null;
+        } catch {
+            return null;
+        }
+    }
+
+    _storePlayerId(code, playerId) {
+        try {
+            if (code && /^player_[1-4]$/.test(playerId ?? '')) {
+                window.localStorage?.setItem(this._storageKey(code), playerId);
+            }
+        } catch {
+            // Storage is best-effort; networking still works without it.
+        }
     }
 
     // ── Low-level sends ───────────────────────────────────────────────────────
@@ -146,6 +174,7 @@ export class NetworkManager {
                 this.playerId = msg.playerId;
                 this.isHost   = true;
                 this.inRoom   = true;
+                this._storePlayerId(this.roomCode, this.playerId);
                 this._cb.created?.(msg);
                 break;
 
@@ -154,6 +183,7 @@ export class NetworkManager {
                 this.playerId = msg.playerId;
                 this.isHost   = false;
                 this.inRoom   = true;
+                this._storePlayerId(this.roomCode, this.playerId);
                 // Spawn remote-player entities for players already in room
                 for (const id of (msg.players ?? [])) game.addRemotePlayer(id);
                 this._cb.joined?.(msg);
@@ -192,7 +222,7 @@ export class NetworkManager {
                 break;
 
             case 'ENEMY_DEATH':
-                this._receiveEnemyDeath(msg.id);
+                this._receiveEnemyDeath(msg.id, msg);
                 break;
 
             case 'ENEMY_RESYNC':
@@ -304,6 +334,10 @@ export class NetworkManager {
 
             case 'REQUEST_BONUS_RAID':
                 if (this.isHost) game.receiveBonusRaidRequest?.(msg._from ?? null, msg);
+                break;
+
+            case 'BONUS_RAID_WARNING':
+                game.applyBonusRaidWarning?.(msg);
                 break;
 
             case 'SKIP_TO_NIGHT_VOTE_STATE':
@@ -448,7 +482,9 @@ export class NetworkManager {
                     hp: Math.round(e.health),
                     maxHp: Math.round(e.maxHealth),
                     scene: e._scene ?? 'overworld',
-                    targetSlot: e.targetCrystalSlot ?? null
+                    targetSlot: e.targetCrystalSlot ?? null,
+                    centralBoss: !!e._versusCenterBoss,
+                    centralBossWave: e._versusCenterBossWave ?? null
                 });
             }
         }
@@ -532,6 +568,8 @@ export class NetworkManager {
             maxHp : enemy.maxHealth,
             scene : enemy._scene ?? 'overworld',
             targetSlot: enemy.targetCrystalSlot ?? null,
+            centralBoss: !!enemy._versusCenterBoss,
+            centralBossWave: enemy._versusCenterBossWave ?? null,
         });
     }
 
@@ -539,7 +577,12 @@ export class NetworkManager {
     onEnemyDied(enemy) {
         if (!this.ready || !this.inRoom || !enemy._netId) return;
         this._netEnemies.delete(enemy._netId);
-        this._relayAll({ type: 'ENEMY_DEATH', id: enemy._netId });
+        this._relayAll({
+            type: 'ENEMY_DEATH',
+            id: enemy._netId,
+            centralBoss: !!enemy._versusCenterBoss,
+            centralBossWave: enemy._versusCenterBossWave ?? null
+        });
     }
 
     // ── Enemy receiving (client side) ─────────────────────────────────────────
@@ -558,6 +601,10 @@ export class NetworkManager {
         enemy._netTargetY        = data.y;
         enemy.health             = data.hp;
         enemy.maxHealth          = data.maxHp ?? data.hp;
+        enemy._versusCenterBoss  = !!data.centralBoss;
+        enemy._versusCenterBossWave = data.centralBossWave ?? null;
+        enemy._ignoreWaveCompletion = !!data.centralBoss;
+        if (enemy._versusCenterBoss) enemy.eliteGlow = true;
         this._netEnemies.set(data.id, enemy);
         this.game.addEntity(enemy);
     }
@@ -606,6 +653,10 @@ export class NetworkManager {
                 existing.maxHealth   = item.maxHp ?? existing.maxHealth;
                 if (item.scene) existing._scene = item.scene;
                 if (item.targetSlot !== undefined) existing.targetCrystalSlot = item.targetSlot;
+                existing._versusCenterBoss = !!item.centralBoss;
+                existing._versusCenterBossWave = item.centralBossWave ?? existing._versusCenterBossWave ?? null;
+                existing._ignoreWaveCompletion = !!item.centralBoss;
+                if (existing._versusCenterBoss) existing.eliteGlow = true;
             }
         }
     }
@@ -628,7 +679,7 @@ export class NetworkManager {
         }
     }
 
-    _receiveEnemyDeath(netId) {
+    _receiveEnemyDeath(netId, data = {}) {
         const e = this._netEnemies.get(netId);
         if (e && !e.destroyed) {
             // On host: handle special on-death spawns for enemies killed by clients.
@@ -655,6 +706,12 @@ export class NetworkManager {
 
             e._dyingFromNetwork = true; // prevents re-broadcast
             e.die();
+        }
+        if (data.centralBoss) {
+            this.game.handleVersusCenterBossDefeated?.(e, {
+                giveReward: false,
+                wave: data.centralBossWave ?? e?._versusCenterBossWave
+            });
         }
         this._netEnemies.delete(netId);
     }
@@ -757,6 +814,7 @@ export class NetworkManager {
 
     sendVersusStructureHit(payload) {
         if (!this.ready || !this.inRoom) return;
+        if (this.game.gameMode === 'versus_ffa' && !this.game.canUseVersusAggression?.()) return;
 
         const data = {
             type: 'VERSUS_STRUCTURE_HIT',
@@ -775,6 +833,7 @@ export class NetworkManager {
     sendVersusPlayerHit(targetPlayerId, payload = {}) {
         if (!this.ready || !this.inRoom) return;
         if (!targetPlayerId || targetPlayerId === this.playerId) return;
+        if (this.game.gameMode === 'versus_ffa' && !this.game.canUseVersusAggression?.()) return;
 
         const damage = Math.max(0, Number(payload?.damage ?? 0));
         if (damage <= 0) return;
@@ -808,6 +867,16 @@ export class NetworkManager {
         }
 
         this._relayHost(data);
+    }
+
+    broadcastBonusRaidWarning(payload = {}) {
+        if (!this.isHost || !this.ready || !this.inRoom) return;
+        this._relayAll({
+            type: 'BONUS_RAID_WARNING',
+            attackerSlot: payload.attackerSlot ?? null,
+            targetSlots: Array.isArray(payload.targetSlots) ? payload.targetSlots : [],
+            raidType: payload.raidType ?? 'mixed'
+        });
     }
 
     _buildVersusMatchStatePayload() {

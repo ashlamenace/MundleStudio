@@ -1627,7 +1627,7 @@ export class Enemy extends Entity {
     }
 
     _triggerPhase2Visuals() {
-        this.game.camera.shake(20, 0.8);
+        this.game.camera.shake(12, 0.45);
         this.game.showNotification(`⚡ ${this.config.name} — Phase 2`, 'Vulnerable !', '#ff4444', 3);
 
         // Aura burst ring
@@ -1789,7 +1789,6 @@ export class Enemy extends Entity {
         } else if (heavyTypes.includes(this.enemyType)) {
             // Heavy: explosion effect + big mark
             this.game.visualEffects?.createExplosionEffect?.(x, y);
-            this.game.camera.shake(12, 0.4);
             this.game.addGroundMark?.(x, y, 'explosion', size * 3);
             this.game.visualEffects.createBloodParticles(x, y, this.color, 15);
 
@@ -1820,11 +1819,14 @@ export class Enemy extends Entity {
             // Boss death: slow-motion + intense screenshake
             if (this.isBoss) {
                 this.game.visualEffects.setTimeScale(0.3, 1.5);
-                this.game.camera.shake(30, 1.0, true);
+                this.game.camera.shake(16, 0.65, true);
                 this.game.audioSystem?.playExplosion();
                 // Artifact drop
                 if (this.game.artifactSystem) {
                     this.game.artifactSystem.rollBossDrop(this.enemyType);
+                }
+                if (this._versusCenterBoss) {
+                    this.game.handleVersusCenterBossDefeated?.(this, { giveReward: true });
                 }
             }
 
@@ -2035,8 +2037,6 @@ export class Enemy extends Entity {
                 ctx.stroke();
             }
         });
-
-        this.game.camera.shake(10, 0.4);
     }
 
     render(ctx) {
@@ -2044,9 +2044,11 @@ export class Enemy extends Entity {
         ctx.translate(this.x, this.y + this.wobble);
 
 
-        // Sprite size: bosses drawn larger
+        // Keep 16x16 enemy assets close to the world's pixel scale.
         const baseSize = Math.max(this.width, this.height);
-        const spriteSize = (this.isBoss ? baseSize * 4 : baseSize * 3) * 0.75;
+        const spriteSize = this.isBoss
+            ? Math.max(44, baseSize * 1.45)
+            : Math.max(22, baseSize);
 
         // Try animated Tiny Swords sprite first
         const drawn = spriteManager.drawEnemyFrame(

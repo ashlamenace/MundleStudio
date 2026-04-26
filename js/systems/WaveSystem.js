@@ -378,7 +378,7 @@ export class WaveSystem {
         }
 
         if (this.isWaveActive && this.spawnQueue.length === 0 && this.bonusSpawnQueue.length === 0) {
-            const enemies = this.game.getEnemies();
+            const enemies = this.getWaveBlockingEnemies();
             if (enemies.length === 0) {
                 this.endWave();
             }
@@ -682,8 +682,12 @@ export class WaveSystem {
      * Get number of remaining enemies
      */
     getRemainingEnemies() {
-        const enemies = this.game.getEnemies();
+        const enemies = this.getWaveBlockingEnemies();
         return this.spawnQueue.length + this.bonusSpawnQueue.length + enemies.length;
+    }
+
+    getWaveBlockingEnemies() {
+        return (this.game.getEnemies?.() ?? []).filter(enemy => !enemy._ignoreWaveCompletion);
     }
 
     /**

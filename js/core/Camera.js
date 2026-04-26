@@ -36,6 +36,8 @@ export class Camera {
         this.shakeStartDuration = 0;
         this.shakeOffsetX = 0;
         this.shakeOffsetY = 0;
+        this._shakeTime = 0;
+        this._shakeCooldown = 0;
     }
 
     /**
@@ -81,10 +83,16 @@ export class Camera {
      * Start camera shake effect
      */
     shake(intensity, duration, decay = true) {
-        this.shakeIntensity = intensity;
-        this.shakeDuration = duration;
+        const nextIntensity = Math.min(16, Math.max(0, intensity * 0.55));
+        const nextDuration = Math.min(0.8, Math.max(0, duration * 0.75));
+        if (nextIntensity < 4) return;
+        if (this._shakeCooldown > 0 && nextIntensity <= this.shakeIntensity * 1.25) return;
+
+        this.shakeIntensity = nextIntensity;
+        this.shakeDuration = nextDuration;
         this.shakeDecay = decay;
-        this.shakeStartDuration = duration; // Track original duration for decay calculation
+        this.shakeStartDuration = nextDuration; // Track original duration for decay calculation
+        this._shakeCooldown = 0.45;
     }
 
     /**
@@ -98,6 +106,10 @@ export class Camera {
         // Smooth zoom
         this.zoom = Utils.lerp(this.zoom, this.targetZoom, this.zoomSmoothing);
 
+        if (this._shakeCooldown > 0) {
+            this._shakeCooldown = Math.max(0, this._shakeCooldown - deltaTime);
+        }
+
         // Clamp to world bounds if set
         if (this.worldBounds) {
             const halfViewWidth = (this.canvas.width / this.zoom) / 2;
@@ -107,33 +119,36 @@ export class Camera {
             this.y = Utils.clamp(this.y, halfViewHeight, this.worldBounds.height - halfViewHeight);
         }
 
-        // Update shake
+        // Update shake — use incommensurable sine waves instead of Math.random()
+        // to get smooth, GPU-friendly motion without per-frame RNG allocation.
         if (this.shakeDuration > 0) {
             this.shakeDuration -= deltaTime;
+            this._shakeTime += deltaTime;
 
-            // Calculate current intensity with optional decay
             const currentIntensity = this.shakeDecay
                 ? this.shakeIntensity * (this.shakeDuration / this.shakeStartDuration)
                 : this.shakeIntensity;
 
-            this.shakeOffsetX = (Math.random() - 0.5) * 2 * currentIntensity;
-            this.shakeOffsetY = (Math.random() - 0.5) * 2 * currentIntensity;
+            this.shakeOffsetX = Math.sin(this._shakeTime * 53) * currentIntensity;
+            this.shakeOffsetY = Math.cos(this._shakeTime * 41) * currentIntensity;
         } else {
             this.shakeOffsetX = 0;
             this.shakeOffsetY = 0;
+            this._shakeTime = 0;
         }
     }
 
     /**
-     * Apply camera transform to context
+     * Apply camera transform to context.
+     * Uses setTransform (single matrix op) instead of translate+scale+translate.
      */
     applyTransform(ctx) {
         ctx.save();
-        ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
-        ctx.scale(this.zoom, this.zoom);
-        ctx.translate(
-            -this.x + this.shakeOffsetX,
-            -this.y + this.shakeOffsetY
+        ctx.setTransform(
+            this.zoom, 0,
+            0, this.zoom,
+            this.canvas.width  / 2 + this.zoom * (-this.x + this.shakeOffsetX),
+            this.canvas.height / 2 + this.zoom * (-this.y + this.shakeOffsetY)
         );
     }
 
@@ -165,20 +180,23 @@ export class Camera {
     }
 
     /**
-     * Get visible bounds in world coordinates
+     * Get visible bounds in world coordinates.
+     * Reuses a single object to avoid per-frame heap allocation.
      */
     getVisibleBounds() {
-        const halfWidth = (this.canvas.width / this.zoom) / 2;
+        const halfWidth  = (this.canvas.width  / this.zoom) / 2;
         const halfHeight = (this.canvas.height / this.zoom) / 2;
 
-        return {
-            left: this.x - halfWidth,
-            right: this.x + halfWidth,
-            top: this.y - halfHeight,
-            bottom: this.y + halfHeight,
-            width: halfWidth * 2,
-            height: halfHeight * 2
-        };
+        if (!this._bounds) {
+            this._bounds = { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
+        }
+        this._bounds.left   = this.x - halfWidth;
+        this._bounds.right  = this.x + halfWidth;
+        this._bounds.top    = this.y - halfHeight;
+        this._bounds.bottom = this.y + halfHeight;
+        this._bounds.width  = halfWidth  * 2;
+        this._bounds.height = halfHeight * 2;
+        return this._bounds;
     }
 
     /**

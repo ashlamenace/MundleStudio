@@ -47,6 +47,7 @@ Le principe cible est :
 
 - restriction de construction a l'ile du joueur uniquement
 - la validation est faite cote local et cote reseau
+- PvP direct et attaques de base verrouilles pendant les 5 premieres minutes
 - support de plusieurs cristaux dans `Game`
 - etat de destruction d'un cristal deja gere
 - lanes de vagues par slot deja en place
@@ -56,6 +57,8 @@ Le principe cible est :
 - mode test solo versus : une partie avec un seul joueur actif ne declenche plus de victoire automatique
 - respawn sur le cristal avec perte de ressources
 - PvP fonctionnel et degats sur les batiments ennemis
+- degats PvP sur structures limites pour eviter les rushs trop explosifs
+- miners, workbench et batiments utilitaires/prod proteges contre la destruction PvP
 - defense autoritative cote proprietaire pour garder la synchro reseau
 - metadata de projectile propagee pour resoudre les hits cote reseau
 - retargeting des ennemis vers un cristal vivant quand une base tombe
@@ -80,6 +83,9 @@ Le principe cible est :
 - synchronisation des slots actifs et elimines
 - resync des cristaux actifs dans les paquets de match
 - skip de journee / nuit gere par vote reseau : l'hote ne lance la nuit que lorsque tous les joueurs eligibles ont vote
+- apres lancement, les nouveaux joueurs sont refuses
+- un joueur peut se reconnecter avec son slot tant que son cristal n'est pas detruit
+- le temps ecoule du match est resynchronise pour garder le verrouillage PvP coherent apres reconnexion
 
 ### Interface
 
@@ -96,8 +102,8 @@ Le principe cible est :
 
 ### Reseau / etat de partie
 
-- gerer proprement les cas de reconnexion ou resync tardif
 - verifier en vraie session que le vote de nuit reste correct apres depart/reconnexion d'un joueur
+- verifier en vraie session que la reconnexion par slot fonctionne bien apres refresh / perte reseau
 
 ### Interface
 
@@ -114,6 +120,8 @@ Le principe cible est :
 
 - la boucle de partie principale est en place, mais la synchronisation en vraie session multi doit encore etre testee en conditions reelles
 - les cristaux actifs sont calcules a partir des joueurs presents au lancement ; la gestion complete d'un depart en cours de partie reste a finaliser
+- la reconnexion depend du meme navigateur, qui conserve le slot via le stockage local
+- l'hote reste autoritatif : si l'hote quitte, la room se ferme encore
 - le mode versus solo sert de sandbox de test et ne donne pas de victoire automatique tant qu'un seul joueur est actif
 - l'equilibrage fin de la perte de ressources, des turrets et du tempo de victoire reste a ajuster apres playtests
 

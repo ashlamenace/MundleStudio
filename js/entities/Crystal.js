@@ -102,9 +102,6 @@ export class Crystal extends Entity {
 
     takeDamage(amount, source) {
         super.takeDamage(amount, source);
-        if (this.isLocalCrystal) {
-            this.game.camera.shake(8, 0.3);
-        }
 
         // Spawn damage burst
         for (let i = 0; i < 5; i++) {
@@ -166,7 +163,7 @@ export class Crystal extends Entity {
         }
 
         if (this.isLocalCrystal) {
-            this.game.camera.shake(12, 0.35);
+            this.game.camera.shake(10, 0.3);
         }
     }
 

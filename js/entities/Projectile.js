@@ -641,7 +641,6 @@ export class Projectile {
             target.takeDamage(this.damage * 0.8, this.owner);
         }
 
-        this.game.camera.shake(5, 0.2);
     }
 }
 

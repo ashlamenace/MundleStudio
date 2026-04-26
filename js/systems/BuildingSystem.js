@@ -917,7 +917,6 @@ export class Building {
         }
 
         this.game.visualEffects?.createExplosionEffect(this.x, this.y, this.explosionRadius);
-        this.game.camera.shake(10, 0.3);
         this.game.audioSystem?.playExplosion?.();
         this.destroy();
     }
@@ -3479,10 +3478,14 @@ export class BuildingSystem {
     }
 
     /**
-     * Render all buildings
+     * Render all buildings — skips buildings outside the visible camera area.
      */
     render(ctx) {
+        const vb = this.game.camera.getVisibleBounds();
+        const margin = 80;
         for (const building of this.buildings) {
+            if (building.x + margin < vb.left  || building.x - margin > vb.right ||
+                building.y + margin < vb.top   || building.y - margin > vb.bottom) continue;
             building.render(ctx);
         }
     }

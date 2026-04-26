@@ -316,7 +316,7 @@ export class CrystalUpgradeSystem {
     _spawnUpgradeBurst() {
         const crystal = this.game.crystal;
         if (!crystal) return;
-        this.game.camera.shake(15, 0.8);
+        this.game.camera.shake(8, 0.35);
 
         for (let i = 0; i < 36; i++) {
             const angle = (Math.PI * 2 / 36) * i;

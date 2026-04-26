@@ -170,6 +170,7 @@ class SpriteManager {
             ['adventure_worker_b', 'assets/sprites/player/Worker_B.png'],
             ['adventure_worker_c', 'assets/sprites/player/Worker_C.png'],
             ['adventure_worker_d', 'assets/sprites/player/Worker_D.png'],
+            ['bridge_wood_sheet', `${cute}/Bridge_Wood.png`],
 
             // ── Enemy sprites ──────────────────────────────────────────────────
             // Red Pawn  → grunt, poisonFrog

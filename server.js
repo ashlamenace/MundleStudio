@@ -94,6 +94,12 @@ httpServer.listen(PORT, () => {
 
 
 const rooms = new Map(); // code → Room
+const VERSUS_SLOT_ORDER = ['north', 'east', 'south', 'west'];
+
+function playerIdForVersusSlot(slot) {
+    const index = VERSUS_SLOT_ORDER.indexOf(slot);
+    return index >= 0 ? `player_${index + 1}` : null;
+}
 
 // ── Room ─────────────────────────────────────────────────────────────────────
 
@@ -102,17 +108,46 @@ class Room {
         this.code = code;
         this.host = hostWs;
         this.members = new Map(); // ws → { id }
+        this.players = new Map(); // id → { ws, connected }
         this._nextId = 2;
+        this.gameStarted = false;
+        this.activePlayerIds = new Set(['player_1']);
+        this.eliminatedPlayerIds = new Set();
         this.members.set(hostWs, { id: 'player_1' });
+        this.players.set('player_1', { ws: hostWs, connected: true });
     }
 
-    addMember(ws) {
-        const id = `player_${this._nextId++}`;
+    addMember(ws, requestedId = null) {
+        const requested = this.normalizePlayerId(requestedId);
+        let id = null;
+
+        if (requested && this.canReconnect(requested)) {
+            id = requested;
+        } else if (this.gameStarted) {
+            throw new Error('Partie déjà lancée : seuls les joueurs encore en vie peuvent se reconnecter');
+        } else {
+            id = `player_${this._nextId++}`;
+            this.activePlayerIds.add(id);
+        }
+
         this.members.set(ws, { id });
+        this.players.set(id, { ws, connected: true });
         return id;
     }
 
-    removeMember(ws) { this.members.delete(ws); }
+    removeMember(ws) {
+        const id = this.getId(ws);
+        this.members.delete(ws);
+        if (id && this.players.has(id)) {
+            if (this.gameStarted) {
+                this.players.set(id, { ws: null, connected: false });
+            } else {
+                this.players.delete(id);
+                this.activePlayerIds.delete(id);
+            }
+        }
+    }
+
     getId(ws)        { return this.members.get(ws)?.id ?? null; }
     isHost(ws)       { return ws === this.host; }
     get size()       { return this.members.size; }
@@ -120,6 +155,42 @@ class Room {
 
     playerList() {
         return [...this.members.values()].map(m => m.id);
+    }
+
+    normalizePlayerId(value) {
+        const id = String(value ?? '').trim();
+        return /^player_[1-4]$/.test(id) ? id : null;
+    }
+
+    canReconnect(playerId) {
+        if (!this.gameStarted) {
+            return this.players.has(playerId) && !this.players.get(playerId)?.connected;
+        }
+        return this.activePlayerIds.has(playerId)
+            && !this.eliminatedPlayerIds.has(playerId)
+            && !this.players.get(playerId)?.connected;
+    }
+
+    canAcceptNewPlayer() {
+        return !this.gameStarted && this.activePlayerIds.size < 4;
+    }
+
+    noteRelay(senderWs, data = {}) {
+        if (!this.isHost(senderWs)) return;
+
+        if (data.type === 'GAME_START') {
+            this.gameStarted = true;
+            const slots = data.versusState?.activeSlots;
+            if (Array.isArray(slots) && slots.length > 0) {
+                this.activePlayerIds = new Set(slots.map(playerIdForVersusSlot).filter(Boolean));
+            } else {
+                this.activePlayerIds = new Set(this.playerList());
+            }
+        }
+
+        if (data.type === 'VERSUS_MATCH_STATE' && Array.isArray(data.eliminatedSlots)) {
+            this.eliminatedPlayerIds = new Set(data.eliminatedSlots.map(playerIdForVersusSlot).filter(Boolean));
+        }
     }
 
     send(ws, msg) {
@@ -185,8 +256,18 @@ wss.on('connection', (ws) => {
                     ws.send(JSON.stringify({ type: 'ERROR', message: 'Room pleine (max 4 joueurs)' }));
                     return;
                 }
+                if (!room.canAcceptNewPlayer() && !room.canReconnect(msg.playerId)) {
+                    ws.send(JSON.stringify({ type: 'ERROR', message: 'Partie déjà lancée : impossible de rejoindre ce match' }));
+                    return;
+                }
 
-                const playerId = room.addMember(ws);
+                let playerId;
+                try {
+                    playerId = room.addMember(ws, msg.playerId);
+                } catch (err) {
+                    ws.send(JSON.stringify({ type: 'ERROR', message: err.message }));
+                    return;
+                }
                 ws._room = room;
                 ws._id   = playerId;
 
@@ -208,6 +289,7 @@ wss.on('connection', (ws) => {
             // Forward to all others in room
             case 'RELAY': {
                 if (!ws._room) return;
+                ws._room.noteRelay(ws, msg.data);
                 ws._room.broadcast({ ...msg.data, _from: ws._id }, ws);
                 break;
             }
@@ -215,6 +297,7 @@ wss.on('connection', (ws) => {
             // Forward to all (including sender — useful for confirmed state)
             case 'RELAY_ALL': {
                 if (!ws._room) return;
+                ws._room.noteRelay(ws, msg.data);
                 ws._room.broadcast({ ...msg.data, _from: ws._id });
                 break;
             }

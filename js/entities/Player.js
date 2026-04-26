@@ -611,10 +611,10 @@ export class Player extends Entity {
         }
 
         // versus: hit hostile players and enemy-owned structures through the shared network damage flow
-        if (!this.game.inCave && this.game.gameMode === 'versus_ffa' && this.game.networkManager?.inRoom) {
+        if (!this.game.inCave && this.game.gameMode === 'versus_ffa' && this.game.networkManager?.inRoom && this.game.canUseVersusAggression?.()) {
             const ownerId = this.game.networkManager.playerId ?? null;
             const ownerSlot = this.game.resolvePlayerSlot(ownerId);
-            const structureDamage = tool.damage * 2 * this.damageMultiplier * (1 + (this._rallyDamageBonus || 0));
+            const rawStructureDamage = tool.damage * this.damageMultiplier * (1 + (this._rallyDamageBonus || 0));
 
             let bestRemotePlayer = null;
             let bestRemotePlayerDist = Infinity;
@@ -651,7 +651,7 @@ export class Player extends Entity {
                     this.game.networkManager?.sendVersusStructureHit({
                         targetType: 'crystal',
                         slot: crystal.ownerSlot,
-                        damage: structureDamage
+                        damage: this.game.getVersusStructureDamage?.(rawStructureDamage, 'crystal') ?? rawStructureDamage
                     });
                     break;
                 }
@@ -660,6 +660,7 @@ export class Player extends Entity {
             const buildings = this.game.buildingSystem.buildings;
             for (const building of buildings) {
                 if (!building?.solid || building.destroyed) continue;
+                if (!this.game.canDamageVersusBuilding?.(building)) continue;
                 const buildingOwnerSlot = this.game.resolvePlayerSlot(building.ownerId);
                 if (!buildingOwnerSlot || buildingOwnerSlot === ownerSlot) continue;
 
@@ -672,7 +673,7 @@ export class Player extends Entity {
                         this.game.networkManager?.sendVersusStructureHit({
                             targetType: 'building',
                             bId: building._netId,
-                            damage: structureDamage
+                            damage: this.game.getVersusStructureDamage?.(rawStructureDamage, 'building') ?? rawStructureDamage
                         });
                         break;
                     }

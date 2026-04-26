@@ -736,12 +736,43 @@ export class World {
         return this.biomes[tileY][tileX];
     }
 
+    isOnVersusBridge(worldX, worldY) {
+        const bridges = this.arenaData?.bridges;
+        if (!bridges?.length) return false;
+
+        return bridges.some(bridge =>
+            worldX >= bridge.x &&
+            worldX < bridge.x + bridge.width &&
+            worldY >= bridge.y &&
+            worldY < bridge.y + bridge.height
+        );
+    }
+
+    unlockVersusCenterIsland() {
+        const data = this.arenaData;
+        if (!data || data.centerUnlocked) return false;
+
+        const centerSegments = data.centerBridgeSegments ?? [];
+        if (centerSegments.length === 0) return false;
+
+        data.bridges = data.bridges ?? [];
+        for (const segment of centerSegments) {
+            if (!data.bridges.includes(segment)) {
+                data.bridges.push(segment);
+            }
+        }
+        data.centerUnlocked = true;
+        return true;
+    }
+
     /**
      * Check if position is passable (tiles + barriers)
      */
     isPassable(worldX, worldY) {
         const tile = this.getTileAt(worldX, worldY);
-        if (!this.isTilePassable(tile)) return false;
+        if (!this.isTilePassable(tile) && (tile !== TileType.WATER || !this.isOnVersusBridge(worldX, worldY))) {
+            return false;
+        }
 
         // Check if blocked by a barrier
         const barrier = this.getBarrierAt(worldX, worldY);
@@ -1054,7 +1085,54 @@ export class World {
             }
         }
 
+        this.renderVersusBridges(ctx, bounds);
         this.renderLandmarks(ctx, bounds);
+    }
+
+    renderVersusBridges(ctx, bounds) {
+        const bridges = this.arenaData?.bridges;
+        if (!bridges?.length) return;
+
+        const sheet = spriteManager.get('bridge_wood_sheet');
+        if (!sheet) return;
+
+        const bridgeSprites = {
+            horizontal: { x: 5, y: 24, w: 38, h: 30 },
+            vertical: { x: 58, y: 21, w: 28, h: 38 }
+        };
+        const bridgeWidth = 40;
+        const repeatLength = 48;
+
+        for (const bridge of bridges) {
+            if (bridge.x > bounds.right || bridge.x + bridge.width < bounds.left ||
+                bridge.y > bounds.bottom || bridge.y + bridge.height < bounds.top) {
+                continue;
+            }
+
+            const isHorizontal = bridge.orientation === 'horizontal';
+            const length = isHorizontal ? bridge.width : bridge.height;
+            const pieces = Math.max(1, Math.ceil(length / repeatLength));
+            const step = length / pieces;
+            const centerX = bridge.x + bridge.width / 2;
+            const centerY = bridge.y + bridge.height / 2;
+
+            for (let i = 0; i < pieces; i++) {
+                const along = -length / 2 + step * (i + 0.5);
+                const src = isHorizontal ? bridgeSprites.horizontal : bridgeSprites.vertical;
+                ctx.save();
+                ctx.translate(
+                    centerX + (isHorizontal ? along : 0),
+                    centerY + (isHorizontal ? 0 : along)
+                );
+                ctx.imageSmoothingEnabled = false;
+                if (isHorizontal) {
+                    ctx.drawImage(sheet, src.x, src.y, src.w, src.h, -step / 2, -bridgeWidth / 2, step, bridgeWidth);
+                } else {
+                    ctx.drawImage(sheet, src.x, src.y, src.w, src.h, -bridgeWidth / 2, -step / 2, bridgeWidth, step);
+                }
+                ctx.restore();
+            }
+        }
     }
 
     /**

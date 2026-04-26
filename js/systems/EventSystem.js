@@ -142,8 +142,8 @@ export class EventSystem {
         const x = Utils.clamp(player.x + Math.cos(angle) * dist, 200, this.game.world.width - 200);
         const y = Utils.clamp(player.y + Math.sin(angle) * dist, 200, this.game.world.height - 200);
 
-        // Screen shake to announce impact
-        this.game.camera.shake(20, 1.0);
+        // Rare impact accent.
+        this.game.camera.shake(10, 0.45);
 
         // Spawn a chest (meteorite loot) at crash site
         const chest = new TreasureChest(this.game, x, y, 'rare');
@@ -244,13 +244,12 @@ export class EventSystem {
             this.eventEntities.push(enemy);
         }
 
-        this.game.camera.shake(10, 0.5);
         this.eventDuration = 30; // Raid ends after 30s or all enemies dead
     }
 
     // --- Earthquake Event ---
     _spawnEarthquakeEvent() {
-        this.game.camera.shake(25, 2.0);
+        this.game.camera.shake(12, 0.8);
 
         // Reveal some bonus resources (add metal/amethyst drops)
         const player = this.game.player;

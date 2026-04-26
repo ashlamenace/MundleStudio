@@ -62,6 +62,13 @@ const BRIDGE_LINKS = Object.freeze([
     ['south', 'southeast']
 ]);
 
+const CENTER_BRIDGE_LINKS = Object.freeze([
+    ['north', 'center'],
+    ['east', 'center'],
+    ['south', 'center'],
+    ['west', 'center']
+]);
+
 const SLOT_SPAWN_OFFSETS = Object.freeze({
     north: { x: 0, y: 320 },
     east:  { x: -320, y: 0 },
@@ -88,6 +95,7 @@ export function buildVersusArena(world, constants) {
     world.supportsCaves = false;
     world.landmarks = [];
     world.pathSegments = [];
+    world.versusBridgeSegments = [];
 
     for (let y = 0; y < world.tilesY; y++) {
         world.tiles[y] = [];
@@ -142,7 +150,16 @@ export function buildVersusArena(world, constants) {
         const from = islandById.get(fromId);
         const to = islandById.get(toId);
         if (from && to) {
-            paintBridge(world, from, to, { BiomeType, TileType });
+            paintBridge(world, from, to);
+        }
+    }
+
+    const centerBridgeSegments = [];
+    for (const [fromId, toId] of CENTER_BRIDGE_LINKS) {
+        const from = islandById.get(fromId);
+        const to = islandById.get(toId);
+        if (from && to) {
+            paintBridge(world, from, to, centerBridgeSegments);
         }
     }
 
@@ -159,6 +176,9 @@ export function buildVersusArena(world, constants) {
     world.arenaData = {
         type: 'versus_ffa',
         islands,
+        bridges: world.versusBridgeSegments,
+        centerBridgeSegments,
+        centerUnlocked: false,
         slots,
         lockedIslandId: lockedIsland.id
     };
@@ -242,11 +262,11 @@ function paintIsland(world, centerTX, centerTY, radiusXTiles, radiusYTiles, tile
     }
 }
 
-function paintBridge(world, from, to, constants) {
-    const { BiomeType, TileType } = constants;
+function paintBridge(world, from, to, targetSegments = world.versusBridgeSegments) {
     const ts = world.tileSize;
-    const bridgeHalfWidthTiles = 2;
+    const bridgeHalfWidthTiles = 0;
     const horizontal = Math.abs(from.center.y - to.center.y) < ts;
+    targetSegments = targetSegments ?? (world.versusBridgeSegments = world.versusBridgeSegments ?? []);
 
     if (horizontal) {
         const rowTY = Math.round(from.center.y / ts - 0.5);
@@ -254,14 +274,14 @@ function paintBridge(world, from, to, constants) {
         const rightIsland = leftIsland === from ? to : from;
         const startTX = Math.round(leftIsland.center.x / ts - 0.5) + leftIsland.radiusXTiles - 1;
         const endTX = Math.round(rightIsland.center.x / ts - 0.5) - rightIsland.radiusXTiles + 1;
+        targetSegments.push({
+            orientation: 'horizontal',
+            x: startTX * ts,
+            y: (rowTY - bridgeHalfWidthTiles) * ts,
+            width: (endTX - startTX + 1) * ts,
+            height: (bridgeHalfWidthTiles * 2 + 1) * ts
+        });
 
-        for (let tx = startTX; tx <= endTX; tx++) {
-            for (let ty = rowTY - bridgeHalfWidthTiles; ty <= rowTY + bridgeHalfWidthTiles; ty++) {
-                if (tx < 0 || tx >= world.tilesX || ty < 0 || ty >= world.tilesY) continue;
-                world.tiles[ty][tx] = TileType.DIRT;
-                world.biomes[ty][tx] = BiomeType.PLAINS;
-            }
-        }
         return;
     }
 
@@ -270,14 +290,13 @@ function paintBridge(world, from, to, constants) {
     const bottomIsland = topIsland === from ? to : from;
     const startTY = Math.round(topIsland.center.y / ts - 0.5) + topIsland.radiusYTiles - 1;
     const endTY = Math.round(bottomIsland.center.y / ts - 0.5) - bottomIsland.radiusYTiles + 1;
-
-    for (let ty = startTY; ty <= endTY; ty++) {
-        for (let tx = colTX - bridgeHalfWidthTiles; tx <= colTX + bridgeHalfWidthTiles; tx++) {
-            if (tx < 0 || tx >= world.tilesX || ty < 0 || ty >= world.tilesY) continue;
-            world.tiles[ty][tx] = TileType.DIRT;
-            world.biomes[ty][tx] = BiomeType.PLAINS;
-        }
-    }
+    targetSegments.push({
+        orientation: 'vertical',
+        x: (colTX - bridgeHalfWidthTiles) * ts,
+        y: startTY * ts,
+        width: (bridgeHalfWidthTiles * 2 + 1) * ts,
+        height: (endTY - startTY + 1) * ts
+    });
 }
 
 function seedPlayerIslandResources(world, island) {

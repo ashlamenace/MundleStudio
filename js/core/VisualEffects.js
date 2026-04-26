@@ -54,7 +54,8 @@ export class VisualEffects {
             indicator.y -= 30 * deltaTime; // Float upward
 
             if (indicator.age >= indicator.lifetime) {
-                this.weaknessIndicators.splice(i, 1);
+                this.weaknessIndicators[i] = this.weaknessIndicators[this.weaknessIndicators.length - 1];
+                this.weaknessIndicators.pop();
             }
         }
     }

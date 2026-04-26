@@ -16,6 +16,8 @@ import { DayNightCycle } from '../world/DayNightCycle.js';
 import { Player } from '../entities/Player.js';
 import { Crystal } from '../entities/Crystal.js';
 import { CaveEntrance } from '../entities/CaveEntrance.js';
+import { Enemy } from '../entities/Enemy.js';
+import { TreasureChest } from '../entities/TreasureChest.js';
 import { WaveSystem } from '../systems/WaveSystem.js';
 import { ResourceSystem } from '../systems/ResourceSystem.js';
 import { BuildingSystem, AUTO_MINER_PRODUCTION_RATES } from '../systems/BuildingSystem.js';
@@ -35,6 +37,8 @@ import { RemotePlayer } from '../entities/RemotePlayer.js';
 
 export const DEFAULT_DAY_DURATION = 90;
 export const DEFAULT_NIGHT_DURATION = 90;
+export const VERSUS_PVP_UNLOCK_TIME = 300;
+const VERSUS_CENTER_BOSS_TYPES = Object.freeze(['berserkTitan', 'frostLord', 'infernoDrake', 'stormWraith', 'voidBehemoth']);
 
 export class Game {
     constructor(canvas) {
@@ -55,6 +59,10 @@ export class Game {
         this.fps = 0;
         this.frameCount = 0;
         this.fpsTimer = 0;
+        this._frameTimes = new Float32Array(60); // rolling buffer of last 60 frame durations (ms)
+        this._frameTimesIdx = 0;
+        this._frameTimeWorst = 0; // worst frame in the current window
+        this._fpsDisplay = '0 FPS  0.0ms  worst:0.0';
 
         // Prestige system
         this.prestige = {
@@ -80,6 +88,11 @@ export class Game {
         this.gameModeConfig = getGameModeConfig(this.gameMode);
         this.matchState = createMatchState(this.gameMode);
         this.playerSlot = null;
+        this.matchElapsedTime = 0;
+        this._versusPvpUnlockNotified = false;
+        this._versusCenterBoss = null;
+        this._versusCenterBossWave = 0;
+        this._versusCenterRewardWave = 0;
         this.skipToNightVoteState = {
             voterIds: new Set(),
             requiredIds: []
@@ -209,7 +222,8 @@ export class Game {
             activeSlots: this.getActiveVersusSlots(),
             eliminatedSlots: [...(this.matchState?.eliminatedSlots ?? [])],
             matchEnded: !!this.matchState?.matchEnded,
-            winnerSlot: this.matchState?.winnerSlot ?? null
+            winnerSlot: this.matchState?.winnerSlot ?? null,
+            matchElapsedTime: this.matchElapsedTime ?? 0
         };
     }
 
@@ -248,6 +262,9 @@ export class Game {
         if (state.winnerSlot !== undefined) {
             this.matchState.winnerSlot = state.winnerSlot;
         }
+        if (typeof state.matchElapsedTime === 'number') {
+            this.matchElapsedTime = Math.max(this.matchElapsedTime ?? 0, state.matchElapsedTime);
+        }
 
         if (this.matchState.matchEnded) {
             this.applyVersusMatchOutcome();
@@ -260,6 +277,44 @@ export class Game {
         if (this.gameMode !== GameMode.VERSUS_FFA) return true;
         const slot = this.resolvePlayerSlot(playerId);
         return this.world?.canBuildAtForSlot(slot, worldX, worldY) ?? false;
+    }
+
+    isVersusPvpUnlocked() {
+        if (this.gameMode !== GameMode.VERSUS_FFA) return true;
+        return (this.matchElapsedTime ?? 0) >= VERSUS_PVP_UNLOCK_TIME;
+    }
+
+    updateVersusCenterAccess(showNotice = true) {
+        if (this.gameMode !== GameMode.VERSUS_FFA || !this.world?.arenaData) return false;
+        if (!this.isVersusPvpUnlocked()) return false;
+
+        const unlocked = this.world.unlockVersusCenterIsland?.() ?? false;
+        if (unlocked && showNotice) {
+            this.showNotification(
+                'Île centrale ouverte',
+                'Les ponts vers le boss et ses coffres sont apparus.',
+                '#ffd166',
+                3
+            );
+        }
+        return unlocked;
+    }
+
+    canUseVersusAggression() {
+        return this.gameMode === GameMode.VERSUS_FFA && this.isVersusPvpUnlocked();
+    }
+
+    canDamageVersusBuilding(building) {
+        if (!building || building.destroyed) return false;
+        return ['wall', 'door', 'barricade', 'turret', 'spikeTrap', 'oilBarrel', 'rallyBanner']
+            .includes(building.type);
+    }
+
+    getVersusStructureDamage(baseDamage, targetType = 'building') {
+        const damage = Math.max(0, Number(baseDamage ?? 0));
+        if (damage <= 0) return 0;
+        const scaled = damage * 0.7;
+        return Math.max(1, Math.min(targetType === 'crystal' ? 22 : 24, scaled));
     }
 
     getPlayerIdForSlot(slot) {
@@ -384,6 +439,7 @@ export class Game {
 
     getHostileRemotePlayersFor(ownerId = null) {
         if (this.gameMode !== GameMode.VERSUS_FFA) return [];
+        if (!this.isVersusPvpUnlocked()) return [];
 
         const ownerSlot = this.resolvePlayerSlot(ownerId ?? this.networkManager?.playerId ?? null);
         return this.getRemotePlayers().filter((remotePlayer) => {
@@ -518,14 +574,33 @@ export class Game {
             wave: payload.wave,
             countScale: payload.countScale
         });
+        this.networkManager?.broadcastBonusRaidWarning?.({ attackerSlot, targetSlots, raidType: payload.raidType });
         this.networkManager?.broadcastWaveUpdate?.(this.waveSystem.currentWave, this.waveSystem.isWaveActive);
         return true;
     }
 
-    applyVersusStructureHit(data) {
+    applyBonusRaidWarning(data = {}) {
         if (this.gameMode !== GameMode.VERSUS_FFA || this.state !== 'playing') return;
 
-        const damage = Math.max(0, Number(data?.damage ?? 0));
+        const localSlot = this.playerSlot ?? this.resolvePlayerSlot();
+        const targetSlots = Array.isArray(data.targetSlots) ? data.targetSlots : [];
+        if (!localSlot || !targetSlots.includes(localSlot)) return;
+
+        const attackerLabel = VERSUS_SLOT_LABELS[data.attackerSlot] ?? 'ADVERSAIRE';
+        const raidLabel = {
+            swarm: 'rapide',
+            siege: 'de siege',
+            mixed: 'mixte'
+        }[data.raidType] ?? 'bonus';
+
+        this.showNotification('Vague bonus !', `${attackerLabel} envoie un raid ${raidLabel}.`, '#ff8844', 2.2);
+    }
+
+    applyVersusStructureHit(data) {
+        if (this.gameMode !== GameMode.VERSUS_FFA || this.state !== 'playing') return;
+        if (!this.isVersusPvpUnlocked()) return;
+
+        let damage = Math.max(0, Number(data?.damage ?? 0));
         if (damage <= 0) return;
 
         const attackerId = data?.attackerId ?? data?._from ?? null;
@@ -534,11 +609,13 @@ export class Game {
         if (data?.targetType === 'building') {
             const building = this.buildingSystem?.buildings?.find((b) => b._netId === data?.bId);
             if (!building || building.destroyed) return;
+            if (!this.canDamageVersusBuilding(building)) return;
 
             const ownerSlot = this.resolvePlayerSlot(building.ownerId);
             if (!ownerSlot || !attackerSlot || ownerSlot === attackerSlot) return;
             if (this.isSlotEliminated(ownerSlot) || this.isSlotEliminated(attackerSlot)) return;
 
+            damage = Math.min(damage, 24);
             building.takeDamage(damage);
             return;
         }
@@ -551,6 +628,7 @@ export class Game {
             if (!targetSlot || !attackerSlot || targetSlot === attackerSlot) return;
             if (this.isSlotEliminated(targetSlot) || this.isSlotEliminated(attackerSlot)) return;
 
+            damage = Math.min(damage, 22);
             crystal.takeDamage(damage, { type: 'player', playerId: attackerId });
             if (crystal.health <= 0) {
                 this.handleCrystalDestroyed(crystal);
@@ -560,6 +638,7 @@ export class Game {
 
     applyVersusPlayerHit(data) {
         if (this.gameMode !== GameMode.VERSUS_FFA || this.state !== 'playing') return;
+        if (!this.isVersusPvpUnlocked()) return;
         if (this.matchState?.localPlayerEliminated) return;
 
         const attackerId = data?.attackerId ?? data?._from ?? null;
@@ -1064,6 +1143,7 @@ export class Game {
         if (!this.waveSystem.isWaveActive) {
             this.waveSystem.startWave();
             this.survivalDays++;
+            this.maybeSpawnVersusCenterBoss();
         }
 
         this.networkManager?.broadcastWaveUpdate(this.waveSystem.currentWave, true);
@@ -1073,6 +1153,115 @@ export class Game {
         this.resetSkipToNightVotes({ broadcast: !!this.networkManager?.inRoom && !!this.networkManager?.isHost });
         this.objectiveSystem?.onNewDay(this.survivalDays);
         this.networkManager?.broadcastWaveUpdate(this.waveSystem?.currentWave ?? 0, false);
+    }
+
+    maybeSpawnVersusCenterBoss() {
+        if (this.gameMode !== GameMode.VERSUS_FFA || !this.isVersusPvpUnlocked()) return null;
+        if (this.networkManager?.inRoom && !this.networkManager.isHost) return null;
+
+        const wave = this.waveSystem?.currentWave ?? 0;
+        if (wave <= 0 || wave % 5 !== 0 || this._versusCenterBossWave === wave) return null;
+
+        const existingBoss = this._versusCenterBoss && !this._versusCenterBoss.destroyed
+            ? this._versusCenterBoss
+            : this.entities?.find(entity => entity._versusCenterBoss && !entity.destroyed);
+        if (existingBoss) {
+            this._versusCenterBoss = existingBoss;
+            this._versusCenterBossWave = wave;
+            this.showNotification('Boss central actif', 'Le gardien de l’île centrale tient toujours sa position.', '#ff9966', 2.4);
+            return existingBoss;
+        }
+
+        const centerIsland = this.world?.getIslandById?.(this.world?.arenaData?.lockedIslandId ?? 'center');
+        if (!centerIsland?.center) return null;
+
+        this.updateVersusCenterAccess(false);
+        const bossIndex = Math.floor(wave / 5 - 1) % VERSUS_CENTER_BOSS_TYPES.length;
+        const bossType = VERSUS_CENTER_BOSS_TYPES[bossIndex] ?? 'berserkTitan';
+        const boss = new Enemy(this, centerIsland.center.x, centerIsland.center.y, bossType);
+        const healthMultiplier = 1.8 + wave * 0.05;
+        const damageMultiplier = 1.25 + wave * 0.035;
+
+        boss._versusCenterBoss = true;
+        boss._versusCenterBossWave = wave;
+        boss._ignoreWaveCompletion = true;
+        boss._scene = 'overworld';
+        boss.aiDirective = 'boss';
+        boss.targetCrystalSlot = null;
+        boss.maxHealth = Math.floor(boss.maxHealth * healthMultiplier);
+        boss.health = boss.maxHealth;
+        boss.damage = Math.floor(boss.damage * damageMultiplier);
+        boss.xp = Math.floor((boss.xp || 150) * 1.8);
+        boss.eliteGlow = true;
+
+        this._versusCenterBoss = boss;
+        this._versusCenterBossWave = wave;
+        this.addEntity(boss);
+        this.networkManager?.registerEnemy?.(boss);
+        this._triggerBossEntrance(boss);
+        this.showNotification('Boss central', 'L’île centrale peut rapporter gros, mais tout le monde peut contester.', '#ff3333', 3.4);
+        return boss;
+    }
+
+    handleVersusCenterBossDefeated(boss, options = {}) {
+        const wave = Math.max(1, Math.floor(options.wave ?? boss?._versusCenterBossWave ?? this.waveSystem?.currentWave ?? 1));
+        if (this._versusCenterRewardWave === wave) return;
+
+        this._versusCenterRewardWave = wave;
+        this._versusCenterBoss = null;
+
+        const centerIsland = this.world?.getIslandById?.(this.world?.arenaData?.lockedIslandId ?? 'center');
+        const center = centerIsland?.center ?? { x: boss?.x ?? this.player.x, y: boss?.y ?? this.player.y };
+        const giveReward = options.giveReward !== false;
+
+        if (giveReward && this.resourceSystem) {
+            const reward = this.getVersusCenterBossReward(wave);
+            for (const [type, amount] of Object.entries(reward)) {
+                this.resourceSystem.addResource(type, amount);
+            }
+            this.showNotification('Boss central vaincu', `Butin direct: ${this.formatCost(reward)}`, '#ffd166', 3);
+        } else {
+            this.showNotification('Boss central vaincu', 'Quatre coffres rares sont apparus sur l’île.', '#ffd166', 2.6);
+        }
+
+        this.spawnVersusCenterRewardChests(center, wave);
+    }
+
+    getVersusCenterBossReward(wave) {
+        return {
+            wood: 120 + wave * 8,
+            stone: 110 + wave * 7,
+            metal: 45 + wave * 4,
+            amethyst: 14 + Math.floor(wave * 1.5)
+        };
+    }
+
+    spawnVersusCenterRewardChests(center, wave) {
+        if (!center) return;
+
+        for (const entity of this.entities ?? []) {
+            if (entity._versusCenterRewardChest) {
+                entity.destroyed = true;
+            }
+        }
+
+        const radius = 116;
+        const tiers = wave >= 15
+            ? ['legendary', 'legendary', 'rare', 'rare']
+            : ['legendary', 'rare', 'rare', 'rare'];
+
+        for (let i = 0; i < 4; i++) {
+            const angle = -Math.PI / 4 + i * (Math.PI / 2);
+            const chest = new TreasureChest(
+                this,
+                center.x + Math.cos(angle) * radius,
+                center.y + Math.sin(angle) * radius,
+                tiers[i] ?? 'rare'
+            );
+            chest._versusCenterRewardChest = true;
+            chest._versusCenterRewardWave = wave;
+            this.addEntity(chest);
+        }
     }
 
     /**
@@ -1214,6 +1403,9 @@ export class Game {
         this.particles   = [];
         this.groundMarks = [];  // persistent decals (blood, scorch, frost)
         this.crystals    = new Map();
+        this._versusCenterBoss = null;
+        this._versusCenterBossWave = 0;
+        this._versusCenterRewardWave = 0;
 
         // Night lighting offscreen canvas (recreated on resize)
         this._lightCanvas = document.createElement('canvas');
@@ -1234,6 +1426,7 @@ export class Game {
         this.world = new World(this, worldDimensions.width, worldDimensions.height, {
             mode: this.gameMode
         });
+        this.updateVersusCenterAccess(false);
         console.log('[GAME] World generated successfully');
 
         // Day/Night cycle (3 minutes total: 90s day, 90s night)
@@ -1396,6 +1589,8 @@ export class Game {
         const options = this._normalizeStartOptions(devModeOrOptions, maybeOptions);
         this.devMode = options.devMode;
         this.setGameMode(options.gameMode);
+        this.matchElapsedTime = 0;
+        this._versusPvpUnlockNotified = false;
         if (this.gameMode === GameMode.VERSUS_FFA) {
             this.matchState.activeSlots = this.getActiveVersusSlots();
         }
@@ -1462,6 +1657,8 @@ export class Game {
         document.getElementById('lobby-screen')?.classList.add('hidden');
         this.startScreen?.classList.add('hidden');
         this.setGameMode(options?.gameMode ?? this.gameMode);
+        this.matchElapsedTime = Math.max(0, Number(options?.matchElapsedTime ?? 0));
+        this._versusPvpUnlockNotified = this.isVersusPvpUnlocked();
         if (this.gameMode === GameMode.VERSUS_FFA && Array.isArray(options?.activeSlots)) {
             const normalizedSlots = options.activeSlots
                 .map(slot => String(slot))
@@ -1863,19 +2060,29 @@ export class Game {
         // Cap delta time to prevent spiral of death
         if (this.deltaTime > 100) this.deltaTime = 100;
 
-        // FPS calculation
-        this.frameCount++;
-        this.fpsTimer += this.deltaTime;
-        if (this.fpsTimer >= 1000) {
-            this.fps = this.frameCount;
+        // FPS / frame-time tracking — rolling buffer of last 60 frames
+        const dt = this.deltaTime;
+        this._frameTimes[this._frameTimesIdx] = dt;
+        this._frameTimesIdx = (this._frameTimesIdx + 1) % 60;
 
-            // Update performance mode based on FPS
+        // Rebuild display string every ~10 frames to keep string allocation low
+        this.frameCount++;
+        this.fpsTimer += dt;
+        if (this.fpsTimer >= 166) { // ~10 frames at 60 FPS
+            let sum = 0, worst = 0;
+            for (let i = 0; i < 60; i++) {
+                const t = this._frameTimes[i];
+                sum += t;
+                if (t > worst) worst = t;
+            }
+            const avgMs  = sum / 60;
+            this.fps = avgMs > 0 ? Math.round(1000 / avgMs) : 0;
+            this._fpsDisplay = `${this.fps} FPS  ${avgMs.toFixed(1)}ms  spike:${worst.toFixed(1)}ms`;
+
             if (this.visualEffects) {
                 this.visualEffects.updatePerformanceMode(this.fps);
             }
-
-            // FPS logged only in dev mode
-            if (this.devMode) console.log(`[GAME] FPS: ${this.fps} | Entities: ${this.entities.length}`);
+            if (this.devMode) console.log(`[GAME] ${this._fpsDisplay} | Entities: ${this.entities.length}`);
             this.frameCount = 0;
             this.fpsTimer = 0;
         }
@@ -1902,6 +2109,18 @@ export class Game {
 
         // Apply time scale from visual effects (slow-motion)
         const effectiveDt = dt * this.visualEffects.timeScale;
+
+        if (this.gameMode === GameMode.VERSUS_FFA) {
+            this.matchElapsedTime += dt;
+            if (!this._versusPvpUnlockNotified && this.isVersusPvpUnlocked()) {
+                this._versusPvpUnlockNotified = true;
+                this.updateVersusCenterAccess(false);
+                this.showNotification('PvP activé', 'Les attaques entre joueurs et bases ennemies sont maintenant disponibles.', '#ff8899', 2.4);
+                this.showNotification('Île centrale ouverte', 'Les ponts vers le boss et ses coffres sont apparus.', '#ffd166', 3);
+            } else if (this._versusPvpUnlockNotified) {
+                this.updateVersusCenterAccess(false);
+            }
+        }
 
         // Update input world position
         this.input.updateWorldPosition(this.camera);
@@ -1967,7 +2186,8 @@ export class Game {
         for (let i = this.projectiles.length - 1; i >= 0; i--) {
             this.projectiles[i].update(effectiveDt);
             if (this.projectiles[i].destroyed) {
-                this.projectiles.splice(i, 1);
+                this.projectiles[i] = this.projectiles[this.projectiles.length - 1];
+                this.projectiles.pop();
             }
         }
 
@@ -1975,7 +2195,8 @@ export class Game {
         for (let i = this.particles.length - 1; i >= 0; i--) {
             this.particles[i].update(effectiveDt);
             if (this.particles[i].destroyed) {
-                this.particles.splice(i, 1);
+                this.particles[i] = this.particles[this.particles.length - 1];
+                this.particles.pop();
             }
         }
 
@@ -1996,12 +2217,20 @@ export class Game {
         if (this.groundMarks) {
             for (let i = this.groundMarks.length - 1; i >= 0; i--) {
                 this.groundMarks[i].update(effectiveDt);
-                if (this.groundMarks[i].destroyed) this.groundMarks.splice(i, 1);
+                if (this.groundMarks[i].destroyed) {
+                    this.groundMarks[i] = this.groundMarks[this.groundMarks.length - 1];
+                    this.groundMarks.pop();
+                }
             }
         }
 
-        // Clean up dead entities
-        this.entities = this.entities.filter(e => !e.destroyed);
+        // Clean up dead entities in-place (avoids array allocation from filter)
+        for (let i = this.entities.length - 1; i >= 0; i--) {
+            if (this.entities[i].destroyed) {
+                this.entities[i] = this.entities[this.entities.length - 1];
+                this.entities.pop();
+            }
+        }
         this._enemiesCache  = null; // invalidate after cleanup
         this._activeTurrets = null;
         // Purge destroyed enemies from the network registry so stale entries
@@ -2089,6 +2318,10 @@ export class Game {
             return;
         }
 
+        // Cache visible world bounds once per frame for frustum culling
+        const _vb = this.camera.getVisibleBounds();
+        const _vm = 100; // world-unit margin for entities at screen edges
+
         // Apply camera transform
         this.camera.applyTransform(ctx);
 
@@ -2105,12 +2338,17 @@ export class Game {
             this.buildingSystem.render(ctx);
         }
 
-        // Render entities sorted by Y for depth (sort in-place on a reused array).
+        // Render entities sorted by Y for depth — only include on-screen entities.
         // Include visible remote players in the depth sort for correct layering.
         if (!this._renderSorted) this._renderSorted = [];
         const rs = this._renderSorted;
         rs.length = 0;
-        for (const e of this.entities) rs.push(e);
+        for (const e of this.entities) {
+            if (e.x + _vm >= _vb.left && e.x - _vm <= _vb.right &&
+                e.y + _vm >= _vb.top  && e.y - _vm <= _vb.bottom) {
+                rs.push(e);
+            }
+        }
         for (const rp of this._remotePlayers.values()) {
             if (this._isRemotePlayerVisible(rp)) rs.push(rp);
         }
@@ -2119,14 +2357,20 @@ export class Game {
             entity.render(ctx);
         }
 
-        // Render projectiles
+        // Render projectiles (skip those outside the visible area)
         for (const projectile of this.projectiles) {
-            projectile.render(ctx);
+            if (projectile.x + _vm >= _vb.left && projectile.x - _vm <= _vb.right &&
+                projectile.y + _vm >= _vb.top  && projectile.y - _vm <= _vb.bottom) {
+                projectile.render(ctx);
+            }
         }
 
-        // Render particles
+        // Render particles (skip those outside the visible area)
         for (const particle of this.particles) {
-            particle.render(ctx);
+            if (particle.x + _vm >= _vb.left && particle.x - _vm <= _vb.right &&
+                particle.y + _vm >= _vb.top  && particle.y - _vm <= _vb.bottom) {
+                particle.render(ctx);
+            }
         }
 
         // Render visual effects (world-space: weakness indicators)
@@ -2185,11 +2429,13 @@ export class Game {
             ctx.fillText(`🕳️ CAVE Lv.${this.currentCave.difficulty}`, 20, 30);
         }
 
-        // Debug: FPS counter and level
-        ctx.fillStyle = 'white';
+        // Perf counter: rolling avg FPS + frame time + worst spike
         ctx.font = '12px monospace';
         ctx.textAlign = 'left';
-        ctx.fillText(`FPS: ${this.fps} | Lv.${this.player.level}`, 10, this.canvas.height - 10);
+        ctx.fillStyle = this.fps >= 60 ? '#88ff88' : this.fps >= 40 ? '#ffdd44' : '#ff4444';
+        ctx.fillText(this._fpsDisplay, 10, this.canvas.height - 10);
+        ctx.fillStyle = '#aaaaaa';
+        ctx.fillText(`Lv.${this.player.level}`, 10, this.canvas.height - 24);
     }
 
     /**
@@ -2227,6 +2473,8 @@ export class Game {
 
             const addLight = (worldX, worldY, radius, softEdge = 0.5) => {
                 const s = this.camera.worldToScreen(worldX, worldY);
+                // Skip lights entirely outside the canvas (no point creating a gradient)
+                if (s.x + radius < 0 || s.x - radius > W || s.y + radius < 0 || s.y - radius > H) return;
                 const grad = lx.createRadialGradient(s.x, s.y, 0, s.x, s.y, radius);
                 grad.addColorStop(0,          `rgba(0,0,0,${alpha})`);
                 grad.addColorStop(softEdge,   `rgba(0,0,0,${alpha * 0.7})`);
@@ -2288,7 +2536,7 @@ export class Game {
         this.visualEffects?.setTimeScale?.(0.05, 1.5);
 
         // Camera shake + zoom-out
-        this.camera.shake(25, 1.2, true);
+        this.camera.shake(14, 0.65, true);
         if (this.camera.zoom !== undefined) {
             const origZoom = this.camera.zoom;
             this.camera.zoom = Math.max(0.4, origZoom * 0.55);
