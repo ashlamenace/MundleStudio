@@ -1,19 +1,15 @@
 @echo off
-title Crystal Guardian - Local Server
+title Crystal Guardian - Public Host
 color 0A
 
 echo ================================================
-echo    CRYSTAL GUARDIAN - SERVEUR LOCAL
+echo    CRYSTAL GUARDIAN - HOST PUBLIC
 echo ================================================
 echo.
-echo Demarrage du serveur Node...
-echo URL locale : http://localhost:3000
-echo WebSocket  : ws://localhost:3000/ws
+echo Demarrage du jeu, du serveur et du tunnel Cloudflare...
+echo Une ligne HOST_URL=... apparaitra des que la partie est prete.
 echo.
-echo Pour une URL Internet temporaire :
-echo   npm run host:public
-echo.
-echo Appuyez sur CTRL+C pour arreter le serveur.
+echo Appuyez sur CTRL+C pour arreter le serveur et le tunnel.
 echo.
 
-node "%~dp0server.js"
+node "%~dp0scripts\host-online.js"

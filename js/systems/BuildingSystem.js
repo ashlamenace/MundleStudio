@@ -81,7 +81,12 @@ export const BuildingConfigs = {
         health: 150,
         cost: { wood: 12 },
         color: '#8b4513',
-        size: 32
+        size: 32,
+        maxLevel: 3,
+        upgradeCosts: {
+            2: { wood: 20, stone: 12 },
+            3: { stone: 25, metal: 15 }
+        }
     },
 
     // TURRETS
@@ -528,6 +533,8 @@ export class Building {
         if (this.type === 'door') {
             this.isOpen = false;
             this.solid = true;
+            this.regen = 0;
+            this.regenTimer = 0;
         }
 
         if (this.type === 'spikeTrap') {
@@ -683,6 +690,15 @@ export class Building {
             this.healRate = this.baseHealRate * (1 + 0.6 * (level - 1));
             this.healRange = this.baseHealRange * (1 + 0.3 * (level - 1));
         }
+
+        if (this.type === 'door') {
+            const healthMults = [1, 2.0, 3.5];
+            const regens     = [0, 0, 2];
+            const colors     = ['#8b4513', '#6b3410', '#7a8a8a'];
+            this.maxHealth = Math.round(this.config.health * (healthMults[level - 1] ?? 1));
+            this.regen     = regens[level - 1] ?? 0;
+            this.color     = colors[level - 1] ?? this.config.color;
+        }
     }
 
     getUpgradeCost(level = this.level + 1) {
@@ -744,6 +760,13 @@ export class Building {
         // Door logic
         if (this.type === 'door') {
             this.updateDoor();
+            if (this.regen > 0 && this.health < this.maxHealth) {
+                this.regenTimer += deltaTime;
+                if (this.regenTimer >= 1) {
+                    this.regenTimer = 0;
+                    this.health = Math.min(this.health + this.regen, this.maxHealth);
+                }
+            }
         }
 
         // Spike trap logic
@@ -1748,33 +1771,59 @@ export class Building {
 
     renderDoor(ctx, color) {
         const half = this.size / 2;
+        const level = this.level;
 
         if (this.isOpen) {
-            // Open door (two halves)
+            // Open: two thin side panels (same for all levels)
             ctx.fillStyle = color;
             ctx.strokeStyle = this.darkenColor(color);
             ctx.lineWidth = 1;
-
-            // Left half
             ctx.fillRect(-half, -half, 6, this.size);
             ctx.strokeRect(-half, -half, 6, this.size);
-
-            // Right half
             ctx.fillRect(half - 6, -half, 6, this.size);
             ctx.strokeRect(half - 6, -half, 6, this.size);
         } else {
-            // Closed door
+            // Closed door base panel
             ctx.fillStyle = color;
             ctx.strokeStyle = this.darkenColor(color);
             ctx.lineWidth = 2;
             ctx.fillRect(-half, -half, this.size, this.size);
             ctx.strokeRect(-half, -half, this.size, this.size);
 
-            // Handle
-            ctx.fillStyle = '#ffcc00';
-            ctx.beginPath();
-            ctx.arc(4, 0, 3, 0, Math.PI * 2);
-            ctx.fill();
+            if (level === 1) {
+                // Wood handle
+                ctx.fillStyle = '#ffcc00';
+                ctx.beginPath();
+                ctx.arc(4, 0, 3, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (level === 2) {
+                // Two horizontal metal reinforcement bands
+                ctx.fillStyle = '#5a5a6a';
+                ctx.fillRect(-half + 2, -7, this.size - 4, 5);
+                ctx.fillRect(-half + 2,  3, this.size - 4, 5);
+                // Metal handle
+                ctx.fillStyle = '#cccccc';
+                ctx.beginPath();
+                ctx.arc(4, 0, 3, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                // Level 3 — iron door: inner frame + corner rivets
+                ctx.strokeStyle = this.darkenColor(color);
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(-half + 4, -half + 4, this.size - 8, this.size - 8);
+                // Corner rivets
+                ctx.fillStyle = '#bbbbbb';
+                for (const [rx, ry] of [[-half + 5, -half + 5], [half - 5, -half + 5], [-half + 5, half - 5], [half - 5, half - 5]]) {
+                    ctx.beginPath();
+                    ctx.arc(rx, ry, 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                // Dark handle
+                ctx.fillStyle = '#888888';
+                ctx.beginPath();
+                ctx.arc(4, 0, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
     }
 

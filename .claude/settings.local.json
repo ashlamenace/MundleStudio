@@ -21,7 +21,11 @@
       "Bash(node --check js/main.js)",
       "Bash(grep -v \"//\")",
       "Bash(node --check server.js)",
-      "Bash(node --input-type=module --check)"
+      "Bash(node --input-type=module --check)",
+      "Bash(node *)",
+      "Bash(nslookup *)",
+      "Bash(curl *)",
+      "PowerShell(Stop-Process *)"
     ]
   }
 }

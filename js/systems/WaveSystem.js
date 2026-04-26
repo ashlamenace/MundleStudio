@@ -311,7 +311,7 @@ export class WaveSystem {
         }
 
         const baseScale = 1 + 5 * 0.07 + 9 * 0.074 + 15 * 0.11;
-        return baseScale + (wave - 30) * 0.16;
+        return baseScale + (wave - 30) * 0.22;
     }
 
     getEliteStats(wave = this.currentWave) {
@@ -324,7 +324,7 @@ export class WaveSystem {
             return {
                 chance,
                 healthMultiplier: 2.45,
-                damageMultiplier: 1.75,
+                damageMultiplier: 1.90,
                 speedMultiplier: 1.26
             };
         }

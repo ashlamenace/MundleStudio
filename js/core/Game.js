@@ -3436,6 +3436,16 @@ export class Game {
             const nextHealRange = (building.baseHealRange || currentHealRange) * (1 + 0.3 * (nextLevel - 1));
             addLine('Soin', currentHealRate.toFixed(1), nextHealRate.toFixed(1), '/s');
             addLine('Portée de soin', Math.round(currentHealRange), Math.round(nextHealRange));
+        } else if (building.type === 'door') {
+            const healthMults = [1, 2.0, 3.5];
+            const regens      = [0, 0, 2];
+            const matNames    = ['Bois', 'Bois renforcé', 'Fer'];
+            nextHealth = Math.round(building.config.health * (healthMults[nextLevel - 1] ?? 1));
+            const nextRegen = regens[nextLevel - 1] ?? 0;
+            if (nextRegen > 0) {
+                addLine('Régénération', (building.regen || 0).toFixed(0), nextRegen.toFixed(0), ' PV/s');
+            }
+            lines.push(`Matériau : ${matNames[building.level - 1]} → ${matNames[nextLevel - 1]}`);
         } else {
             lines.push('Améliore les statistiques globales du bâtiment.');
         }

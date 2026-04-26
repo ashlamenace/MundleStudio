@@ -1058,9 +1058,9 @@ export class Enemy extends Entity {
 
     shouldAttackBlockingBuilding(building) {
         if (!building || building.destroyed) return false;
-        const category = this.classifyTarget(building);
-        if (this.target !== this.getAssignedCrystal()) return false;
-        return category === 'wall';
+        // Attack wall-like obstacles in path regardless of current target —
+        // walls are only useful as barriers if enemies actually have to break them.
+        return this.classifyTarget(building) === 'wall';
     }
 
     /**
@@ -1161,8 +1161,9 @@ export class Enemy extends Entity {
         if (building.health < building.maxHealth * 0.35) tacticalMultiplier += 0.15;
         tacticalMultiplier = Math.min(1.85, tacticalMultiplier);
 
-        // Enemies deal more damage to buildings than to player
-        const buildingDamage = Math.floor(this.damage * this.buildingDamageMultiplier * tacticalMultiplier);
+        // Night waves are extra lethal against structures
+        const nightBonus = this.game.dayNight?.isNight ? (this.game._nightDamageBonus || 1) : 1;
+        const buildingDamage = Math.floor(this.damage * this.buildingDamageMultiplier * tacticalMultiplier * nightBonus);
         building.takeDamage(buildingDamage);
         this.attackCooldown = this.attackSpeed;
     }
@@ -1400,10 +1401,7 @@ export class Enemy extends Entity {
             destroyed: false,
             update(dt) {
                 this.age += dt;
-                if (this.age >= this.life) {
-                    this.destroyed = true;
-                    return;
-                }
+                if (this.age >= this.life) { this.destroyed = true; return; }
 
                 this.x += this.vx * dt;
                 this.y += this.vy * dt;
@@ -1411,6 +1409,31 @@ export class Enemy extends Entity {
                 this.trail.push({ x: this.x, y: this.y });
                 if (this.trail.length > 6) this.trail.shift();
 
+                // Wall collision — projectile is blocked by solid wall-like buildings.
+                // Checked before player so walls actually shield the player.
+                const buildings = game.buildingSystem?.buildings;
+                if (buildings) {
+                    for (const b of buildings) {
+                        if (b.destroyed || !b.solid || !owner.isWallLike?.(b.type)) continue;
+                        const bHalf = (b.size || 32) / 2;
+                        // AABB pre-reject (fast path for distant buildings)
+                        if (Math.abs(this.x - b.x) > bHalf + this.radius + 2 ||
+                            Math.abs(this.y - b.y) > bHalf + this.radius + 2) continue;
+                        // Proper AABB-circle collision
+                        const cx = Math.max(b.x - bHalf, Math.min(this.x, b.x + bHalf));
+                        const cy = Math.max(b.y - bHalf, Math.min(this.y, b.y + bHalf));
+                        const dx = cx - this.x, dy = cy - this.y;
+                        if (dx * dx + dy * dy < this.radius * this.radius) {
+                            b.takeDamage(Math.floor(this.damage * (owner.buildingDamageMultiplier || 2)));
+                            owner.spawnSkillImpact(this.x, this.y, '#ff8800');
+                            this.destroyed = true;
+                            break;
+                        }
+                    }
+                    if (this.destroyed) return;
+                }
+
+                // Player collision
                 const player = game.player;
                 if (!player || player.destroyed || player.health <= 0) return;
 

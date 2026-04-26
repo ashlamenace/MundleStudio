@@ -22,17 +22,39 @@ http://<ton-ip-locale>:3000
 
 ## Partage temporaire sur Internet
 
-Installe `cloudflared`, puis lance :
+Lance simplement :
 
 ```powershell
-npm run host:public
+npm start
 ```
+
+ou double-clique `start.bat`.
 
 Le script :
 
 - demarre `server.js` en local sur `http://localhost:3000`
-- ouvre un tunnel Cloudflare temporaire vers cette adresse
-- affiche une URL publique `https://...trycloudflare.com`
+- installe une copie locale de `cloudflared` dans `.codex-hosting` sur Windows
+- ouvre un tunnel Cloudflare temporaire en HTTP/2 IPv4 vers cette adresse
+- verifie que l'URL publique repond vraiment avant d'afficher `HOST_URL=https://...trycloudflare.com`
+- ouvre automatiquement le jeu dans le navigateur
+
+Si tu veux garder le navigateur ferme au lancement :
+
+```powershell
+$env:OPEN_BROWSER="0"; npm start
+```
+
+Pour forcer la reinstallation de `cloudflared` :
+
+```powershell
+$env:CLOUDFLARED_FORCE_DOWNLOAD="1"; npm start
+```
+
+L'ancien alias reste disponible :
+
+```powershell
+npm run host:public
+```
 
 Partage uniquement cette URL publique. Les joueurs n'ont rien d'autre a configurer : le jeu utilise automatiquement le WebSocket de la meme origine sur `/ws`.
 

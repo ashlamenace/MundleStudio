@@ -4,7 +4,7 @@
   "description": "Crystal Guardian multiplayer relay server",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node scripts/host-online.js",
     "server": "node server.js",
     "host:local": "node server.js",
     "host:public": "node scripts/host-online.js"
