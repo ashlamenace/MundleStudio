@@ -65,12 +65,13 @@ export class Entity {
     /**
      * Take damage
      */
-    takeDamage(amount, source = null) {
+    takeDamage(amount, source = null, suppressParticles = false) {
         this.health -= amount;
         this.flashTimer = 0.1;
 
-        // Spawn damage particles
-        this.spawnDamageParticles(amount);
+        if (!suppressParticles) {
+            this.spawnDamageParticles(amount);
+        }
 
         if (this.health <= 0) {
             this.die();

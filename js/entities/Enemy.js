@@ -419,6 +419,8 @@ export class Enemy extends Entity {
         this.iceHitCount = 0;
         this.frozen = false;
         this.frozenTimer = 0;
+        this.slowTimer = 0;
+        this.slowOriginalSpeed = 0;
 
         // Network sync (set by NetworkManager on client-side puppet enemies)
         this._networkControlled = false;
@@ -506,19 +508,21 @@ export class Enemy extends Entity {
                 if (this.burnTimer >= 1) {
                     this.burnTimer = 0;
                     this.burnDuration -= 1;
-                    this.game.addParticle({
-                        x: this.x + Utils.randomFloat(-10, 10),
-                        y: this.y + Utils.randomFloat(-10, 10),
-                        vy: -30, color: '#ff6600',
-                        lifetime: 0.5, age: 0, size: 4, destroyed: false,
-                        update(dt) { this.y += this.vy * dt; this.age += dt; if (this.age >= this.lifetime) this.destroyed = true; },
-                        render(ctx) {
-                            const alpha = 1 - this.age / this.lifetime;
-                            ctx.fillStyle = this.color; ctx.globalAlpha = alpha;
-                            ctx.fillRect(this.x - this.size / 2, this.y - this.size / 2, this.size, this.size);
-                            ctx.globalAlpha = 1;
-                        }
-                    });
+                    if (this.burnDuration % 2 === 0) {
+                        this.game.addParticle({
+                            x: this.x + Utils.randomFloat(-10, 10),
+                            y: this.y + Utils.randomFloat(-10, 10),
+                            vy: -30, color: '#ff6600',
+                            lifetime: 0.5, age: 0, size: 4, destroyed: false,
+                            update(dt) { this.y += this.vy * dt; this.age += dt; if (this.age >= this.lifetime) this.destroyed = true; },
+                            render(ctx) {
+                                const alpha = 1 - this.age / this.lifetime;
+                                ctx.fillStyle = this.color; ctx.globalAlpha = alpha;
+                                ctx.fillRect(this.x - this.size / 2, this.y - this.size / 2, this.size, this.size);
+                                ctx.globalAlpha = 1;
+                            }
+                        });
+                    }
                 }
             }
 
@@ -603,37 +607,50 @@ export class Enemy extends Entity {
             this.flashTimer -= deltaTime;
         }
 
-        // Burn damage over time
+        // Burn damage over time — suppress floating numbers (text rendering is costly at scale)
         if (this.burnDuration > 0) {
             this.burnTimer += deltaTime;
             if (this.burnTimer >= 1) {
                 this.burnTimer = 0;
-                this.takeDamage(this.burnDamage, null);
+                this.takeDamage(this.burnDamage, null, 'fire', true);
                 this.burnDuration -= 1;
 
-                // Burn particle
-                this.game.addParticle({
-                    x: this.x + Utils.randomFloat(-10, 10),
-                    y: this.y + Utils.randomFloat(-10, 10),
-                    vy: -30,
-                    color: '#ff6600',
-                    lifetime: 0.5,
-                    age: 0,
-                    size: 4,
-                    destroyed: false,
-                    update(dt) {
-                        this.y += this.vy * dt;
-                        this.age += dt;
-                        if (this.age >= this.lifetime) this.destroyed = true;
-                    },
-                    render(ctx) {
-                        const alpha = 1 - this.age / this.lifetime;
-                        ctx.fillStyle = this.color;
-                        ctx.globalAlpha = alpha;
-                        ctx.fillRect(this.x - this.size / 2, this.y - this.size / 2, this.size, this.size);
-                        ctx.globalAlpha = 1;
-                    }
-                });
+                // Visual particle every other tick only
+                if (this.burnDuration % 2 === 0) {
+                    this.game.addParticle({
+                        x: this.x + Utils.randomFloat(-10, 10),
+                        y: this.y + Utils.randomFloat(-10, 10),
+                        vy: -30,
+                        color: '#ff6600',
+                        lifetime: 0.5,
+                        age: 0,
+                        size: 4,
+                        destroyed: false,
+                        update(dt) {
+                            this.y += this.vy * dt;
+                            this.age += dt;
+                            if (this.age >= this.lifetime) this.destroyed = true;
+                        },
+                        render(ctx) {
+                            const alpha = 1 - this.age / this.lifetime;
+                            ctx.fillStyle = this.color;
+                            ctx.globalAlpha = alpha;
+                            ctx.fillRect(this.x - this.size / 2, this.y - this.size / 2, this.size, this.size);
+                            ctx.globalAlpha = 1;
+                        }
+                    });
+                }
+            }
+        }
+
+        // Slow effect countdown (replaces setTimeout-based restoration)
+        if (this.slowTimer > 0) {
+            this.slowTimer -= deltaTime;
+            if (this.slowTimer <= 0) {
+                this.slowTimer = 0;
+                if (!this.frozen) {
+                    this.speed = this.slowOriginalSpeed || (this.config?.speed ?? 60);
+                }
             }
         }
 
@@ -642,6 +659,10 @@ export class Enemy extends Entity {
             this.frozenTimer -= deltaTime;
             if (this.frozenTimer <= 0) {
                 this.frozen = false;
+                // Restore speed if not still slowed
+                if (this.slowTimer <= 0) {
+                    this.speed = this.slowOriginalSpeed || (this.config?.speed ?? 60);
+                }
             }
         }
 
@@ -1099,7 +1120,7 @@ export class Enemy extends Entity {
     /**
      * Take damage with resistance/weakness system
      */
-    takeDamage(damage, source, damageType = 'physical') {
+    takeDamage(damage, source, damageType = 'physical', suppressParticles = false) {
         if (this._takingNetworkDamage) return;
 
         if (source && source !== this && typeof source.x === 'number' && typeof source.y === 'number') {
@@ -1130,7 +1151,7 @@ export class Enemy extends Entity {
         }
 
         // Call parent takeDamage
-        super.takeDamage(Math.floor(finalDamage), source);
+        super.takeDamage(Math.floor(finalDamage), source, suppressParticles);
 
         // Broadcast hit to other clients (sender already applied damage locally).
         // Skip when already destroyed — die() already sent ENEMY_DEATH so an

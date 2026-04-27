@@ -135,12 +135,6 @@ export class RemotePlayer extends Entity {
             ctx.fillStyle = this._tint + '66';
             ctx.fillRect(-28, -28, 56, 56);
             ctx.globalCompositeOperation = 'source-over';
-        } else {
-            // Subtle tint overlay to distinguish from local player
-            ctx.globalCompositeOperation = 'multiply';
-            ctx.fillStyle = this._tint + '55'; // ~33% opacity
-            ctx.fillRect(-DRAW / 2, -DRAW / 2, DRAW, DRAW);
-            ctx.globalCompositeOperation = 'source-over';
         }
 
         ctx.restore();

@@ -362,53 +362,18 @@ export class Projectile {
     render(ctx) {
         this.renderTrail(ctx);
 
-        // Projectile body
         ctx.save();
         ctx.translate(this.x, this.y);
         ctx.rotate(this.angle);
 
-        if (this.type === 'arrow') {
-            // Arrow shape (compact tail, same silhouette)
-            const arrowSize = this.size * 0.5;
-            ctx.fillStyle = this.color;
-            ctx.beginPath();
-            ctx.moveTo(arrowSize, 0);
-            ctx.lineTo(-arrowSize * 0.34, -arrowSize / 3);
-            ctx.lineTo(-arrowSize * 0.18, 0);
-            ctx.lineTo(-arrowSize * 0.34, arrowSize / 3);
-            ctx.closePath();
-            ctx.fill();
-        } else if (this.type === 'bullet') {
-            // Bullet shape
-            ctx.fillStyle = this.color;
-            ctx.beginPath();
-            ctx.ellipse(0, 0, this.size, this.size / 2, 0, 0, Math.PI * 2);
-            ctx.fill();
-        } else if (this.type === 'laser') {
-            // Laser beam (no shadowBlur — use double-line for glow effect)
-            const tail = this.size * 1.1;
-            ctx.lineWidth = 4;
-            ctx.strokeStyle = 'rgba(255,100,0,0.3)';
-            ctx.beginPath();
-            ctx.moveTo(-tail, 0);
-            ctx.lineTo(this.size, 0);
-            ctx.stroke();
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = this.color;
-            ctx.beginPath();
-            ctx.moveTo(-tail, 0);
-            ctx.lineTo(this.size, 0);
-            ctx.stroke();
-        } else if (this.type === 'ice') {
-            this.renderIceShard(ctx);
-        } else if (this.type === 'flame') {
-            this.renderFlameShot(ctx);
-        } else if (this.type === 'sniper') {
-            this.renderSniperRound(ctx);
-        } else if (this.type === 'ballista') {
-            this.renderBallistaBolt(ctx);
-        } else if (this.type === 'fireball') {
-            this.renderFlameShot(ctx);
+        switch (this.type) {
+            case 'bullet':               this.renderBullet(ctx);       break;
+            case 'laser':                this.renderLaserBolt(ctx);    break;
+            case 'ice':                  this.renderIceShard(ctx);     break;
+            case 'flame': case 'fireball': this.renderFlameShot(ctx);  break;
+            case 'sniper':               this.renderSniperRound(ctx);  break;
+            case 'ballista':             this.renderBallistaBolt(ctx); break;
+            case 'arrow':                this.renderArrow(ctx);        break;
         }
 
         ctx.restore();
@@ -418,18 +383,20 @@ export class Projectile {
         if (this.trail.length <= 1) return;
 
         const trailStyles = {
-            laser: { width: 4, color: 'rgba(255, 110, 60, 0.55)' },
-            ice: { width: 3, color: 'rgba(130, 225, 255, 0.55)' },
-            flame: { width: 5, color: 'rgba(255, 120, 35, 0.45)' },
-            sniper: { width: 1, color: 'rgba(255, 235, 160, 0.75)' },
-            ballista: { width: 2, color: 'rgba(210, 160, 90, 0.45)' },
-            arrow: { width: 2, color: this.color }
+            bullet:   { width: 1, color: 'rgba(140, 148, 168, 0.5)' },
+            laser:    { width: 2, color: 'rgba(0, 180, 220, 0.5)'   },
+            ice:      { width: 2, color: 'rgba(100, 200, 240, 0.5)' },
+            flame:    { width: 3, color: 'rgba(220, 80, 0, 0.4)'    },
+            fireball: { width: 3, color: 'rgba(220, 80, 0, 0.4)'    },
+            sniper:   { width: 1, color: 'rgba(200, 170, 50, 0.6)'  },
+            ballista: { width: 2, color: 'rgba(160, 120, 60, 0.4)'  },
+            arrow:    { width: 1, color: 'rgba(180, 140, 80, 0.5)'  },
         };
-        const style = trailStyles[this.type] || { width: 2, color: this.color };
+        const style = trailStyles[this.type] || { width: 1, color: 'rgba(200,200,200,0.4)' };
 
         ctx.strokeStyle = style.color;
         ctx.lineWidth = style.width;
-        ctx.lineCap = 'round';
+        ctx.lineCap = 'square';
         ctx.beginPath();
         ctx.moveTo(this.trail[0].x, this.trail[0].y);
         for (let i = 1; i < this.trail.length; i++) {
@@ -438,59 +405,86 @@ export class Projectile {
         ctx.stroke();
     }
 
+    // --- Pixel-art projectile renders (16×16 DA, x+ = forward) ---
+
+    renderBullet(ctx) {
+        // Metal slug — gunmetal shaft, bright top face, dark front tip
+        ctx.fillStyle = '#5c6474';
+        ctx.fillRect(-4, -1, 8, 2);
+        ctx.fillStyle = '#8c94a8';
+        ctx.fillRect(-3, -1, 6, 1);  // highlight top face
+        ctx.fillStyle = '#1e202a';
+        ctx.fillRect(3, -1, 2, 2);   // dark front tip
+    }
+
+    renderLaserBolt(ctx) {
+        // Cyan energy bolt — dim outer casing, 1px bright core, glowing tip
+        ctx.fillStyle = '#00384c';
+        ctx.fillRect(-5, -1, 10, 2);
+        ctx.fillStyle = '#00c0e0';
+        ctx.fillRect(-4, 0, 8, 1);   // 1px bright core line
+        ctx.fillStyle = '#80f0ff';
+        ctx.fillRect(3, -1, 3, 2);   // bright front cap
+    }
+
     renderIceShard(ctx) {
-        ctx.fillStyle = '#b9f3ff';
-        ctx.strokeStyle = '#4fb6d8';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(this.size * 1.6, 0);
-        ctx.lineTo(-this.size * 0.55, -this.size * 0.65);
-        ctx.lineTo(-this.size * 0.18, 0);
-        ctx.lineTo(-this.size * 0.55, this.size * 0.65);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
+        // Ice crystal shard — dark base, bright top face, sharp forward tip
+        ctx.fillStyle = '#3080a8';
+        ctx.fillRect(-3, -1, 6, 2);
+        ctx.fillStyle = '#90d8f0';
+        ctx.fillRect(-2, -1, 5, 1);  // light top face
+        ctx.fillStyle = '#daf6ff';
+        ctx.fillRect(3, 0, 2, 1);    // sharp pointing tip (center axis)
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(-1, -1, 1, 1);  // specular highlight
     }
 
     renderFlameShot(ctx) {
-        const flicker = 1 + Math.sin(this.spin * 2) * 0.12;
-        ctx.fillStyle = 'rgba(255, 90, 25, 0.95)';
-        ctx.beginPath();
-        ctx.ellipse(0, 0, this.size * 1.35 * flicker, this.size * 0.8, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = 'rgba(255, 220, 90, 0.9)';
-        ctx.beginPath();
-        ctx.ellipse(this.size * 0.2, 0, this.size * 0.65, this.size * 0.38, 0, 0, Math.PI * 2);
-        ctx.fill();
+        // Fireball — dark red outer, orange body, yellow hot core
+        ctx.fillStyle = '#bb1800';
+        ctx.fillRect(-3, -2, 6, 4);  // outer dark red (defines silhouette)
+        ctx.fillStyle = '#ff4800';
+        ctx.fillRect(-2, -2, 6, 4);  // orange body (1px dark back edge remains)
+        ctx.fillStyle = '#ff9020';
+        ctx.fillRect(-1, -1, 4, 2);  // bright orange inner
+        ctx.fillStyle = '#ffe040';
+        ctx.fillRect(0, 0, 2, 1);    // yellow hot core (front-biased)
     }
 
     renderSniperRound(ctx) {
-        ctx.fillStyle = this.isCrit ? '#fff36b' : '#f0e0a0';
-        ctx.strokeStyle = '#5a4a2a';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(this.size * 1.8, 0);
-        ctx.lineTo(-this.size * 0.55, -this.size * 0.35);
-        ctx.lineTo(-this.size * 0.55, this.size * 0.35);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
+        // Long AP needle — very thin, metallic, dark front tip
+        ctx.fillStyle = this.isCrit ? '#c8a800' : '#604818';
+        ctx.fillRect(-7, -1, 10, 2);
+        ctx.fillStyle = this.isCrit ? '#ffec40' : '#b08828';
+        ctx.fillRect(-6, -1, 9, 1);  // bright top edge
+        ctx.fillStyle = '#100c00';
+        ctx.fillRect(2, -1, 2, 2);   // dark front tip
     }
 
     renderBallistaBolt(ctx) {
-        ctx.strokeStyle = '#7a4f2a';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(-this.size * 0.8, 0);
-        ctx.lineTo(this.size * 1.8, 0);
-        ctx.stroke();
-        ctx.fillStyle = '#d7b071';
-        ctx.beginPath();
-        ctx.moveTo(this.size * 2.0, 0);
-        ctx.lineTo(this.size * 0.9, -this.size * 0.55);
-        ctx.lineTo(this.size * 0.9, this.size * 0.55);
-        ctx.closePath();
-        ctx.fill();
+        // Large bolt — dark wood shaft, lighter grain, metal broadhead
+        ctx.fillStyle = '#5a3c1c';
+        ctx.fillRect(-5, -1, 8, 2);
+        ctx.fillStyle = '#8c6030';
+        ctx.fillRect(-4, -1, 6, 1);  // wood grain highlight
+        ctx.fillStyle = '#b08830';
+        ctx.fillRect(2, -2, 4, 4);   // broadhead base
+        ctx.fillStyle = '#d4b050';
+        ctx.fillRect(4, -1, 3, 2);   // bright metal tip
+        ctx.fillStyle = '#3a2808';
+        ctx.fillRect(2, -2, 1, 4);   // shadow edge on head
+    }
+
+    renderArrow(ctx) {
+        // Player arrow — wood shaft, dark metal tip, feathered back
+        const s = this.size * 0.5;
+        ctx.fillStyle = '#9a7040';
+        ctx.fillRect(-Math.round(s * 1.2), -1, Math.round(s * 2.2), 2);
+        ctx.fillStyle = '#282010';
+        ctx.fillRect(Math.round(s * 0.8), -1, Math.round(s * 0.6), 2);
+        ctx.fillStyle = this.color;
+        ctx.fillRect(-Math.round(s * 1.4), -2, Math.round(s * 0.6), 1);
+        ctx.fillRect(-Math.round(s * 1.4), 1, Math.round(s * 0.6), 1);
     }
 
 
@@ -525,13 +519,10 @@ export class Projectile {
                             const alpha = 1 - this.age / this.lifetime;
                             ctx.strokeStyle = `rgba(255, 255, 100, ${alpha})`;
                             ctx.lineWidth = 3;
-                            ctx.shadowColor = '#ffff00';
-                            ctx.shadowBlur = 10;
                             ctx.beginPath();
                             ctx.moveTo(this.x, this.y);
                             ctx.lineTo(this.targetX, this.targetY);
                             ctx.stroke();
-                            ctx.shadowBlur = 0;
                         }
                     });
                 }
@@ -544,7 +535,7 @@ export class Projectile {
             enemy.frozenTimer = 2.0;
             enemy.speed = 0;
 
-            // Freeze visual
+            // Freeze visual — snapshot coordinates to avoid capturing live enemy reference
             this.game.addParticle({
                 x: enemy.x,
                 y: enemy.y,
@@ -558,22 +549,23 @@ export class Projectile {
                 render(ctx) {
                     const alpha = 0.6 * (1 - this.age / this.lifetime);
                     ctx.fillStyle = `rgba(100, 200, 255, ${alpha})`;
-                    ctx.fillRect(enemy.x - 20, enemy.y - 20, 40, 40);
+                    ctx.fillRect(this.x - 20, this.y - 20, 40, 40);
                 }
             });
         }
 
-        // Slow effect (Frost)
+        // Slow effect (Frost) — use a timer instead of setTimeout to avoid callback accumulation
         if (this.slowEffect > 0) {
             const config = enemy.config || {};
             const originalSpeed = config.speed || 60;
-            enemy.speed = originalSpeed * (1 - this.slowEffect);
-
-            setTimeout(() => {
-                if (!enemy.destroyed && !enemy.frozen) {
-                    enemy.speed = originalSpeed;
-                }
-            }, this.slowDuration * 1000);
+            const newSpeed = originalSpeed * (1 - this.slowEffect);
+            // Only refresh the slow if the new speed is slower (don't stack weaker slows)
+            if (!enemy.slowTimer || newSpeed <= enemy.speed) {
+                enemy.speed = newSpeed;
+            }
+            enemy.slowOriginalSpeed = originalSpeed;
+            // Refresh the timer (re-applying replaces the existing one)
+            enemy.slowTimer = this.slowDuration;
         }
 
         // Burn damage (Flame)

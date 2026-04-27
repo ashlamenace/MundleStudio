@@ -493,6 +493,7 @@ export class Building {
             this.fireCooldown = 0;
             this.targetAngle = 0;
             this.currentTarget = null;
+            this._targetRefreshCooldown = 0;
             this.projectileType = config.projectileType || 'bullet';
             this.slowEffect = config.slowEffect || 0;
 
@@ -1175,8 +1176,14 @@ export class Building {
             this.fireCooldown -= deltaTime;
         }
 
-        // Find target
-        this.currentTarget = this.findTarget();
+        // Find target — refresh at 10 Hz instead of every frame
+        this._targetRefreshCooldown -= deltaTime;
+        if (this._targetRefreshCooldown <= 0) {
+            this._targetRefreshCooldown = 0.1;
+            this.currentTarget = this.findTarget();
+        } else if (this.currentTarget?.destroyed) {
+            this.currentTarget = null;
+        }
 
         if (this.currentTarget) {
             // Rotate towards target
@@ -1345,19 +1352,17 @@ export class Building {
             createProjectile(0.1);
         }
 
-        // Apply slow effect if applicable (Frost turret)
+        // Apply slow effect if applicable (Frost turret) — use timer, not setTimeout
         if (this.slowEffect > 0 && this.currentTarget) {
             const target = this.currentTarget;
             const config = target.config || {};
             const originalSpeed = config.speed || 60;
-            target.speed = originalSpeed * (1 - this.slowEffect);
-
-            // Reset speed after duration
-            setTimeout(() => {
-                if (!target.destroyed && !target.frozen) {
-                    target.speed = originalSpeed;
-                }
-            }, this.slowDuration * 1000);
+            const newSpeed = originalSpeed * (1 - this.slowEffect);
+            if (!target.slowTimer || newSpeed <= target.speed) {
+                target.speed = newSpeed;
+            }
+            target.slowOriginalSpeed = originalSpeed;
+            target.slowTimer = this.slowDuration;
         }
     }
 
@@ -1999,18 +2004,20 @@ export class Building {
     renderDistinctTurret(ctx, color) {
         const tier = Math.max(1, Math.min(5, this.level || 1));
         const palette = {
-            basic:    { base: '#3f4c5c', top: '#8aa0b8', accent: '#cbe0f7' },
-            laser:    { base: '#34475f', top: '#68a7d3', accent: '#9ff9ff' },
-            frost:    { base: '#355d6e', top: '#62c8de', accent: '#d8fbff' },
-            flame:    { base: '#5b3f4b', top: '#ff8c52', accent: '#ffd36a' },
-            sniper:   { base: '#3f5468', top: '#98b6cf', accent: '#f6f8ff' },
-            ballista: { base: '#3f4a63', top: '#7fa4c9', accent: '#a7dbff' }
-        }[this.subType] || { base: '#3f4c5c', top: '#8aa0b8', accent: '#cbe0f7' };
+            basic:    { outline: '#15202b', base: '#48515e', dark: '#26313d', light: '#8796a8', accent: '#d7e4f0', shot: '#f2dc64' },
+            laser:    { outline: '#122232', base: '#314b67', dark: '#1e3248', light: '#4f8fbc', accent: '#9ff6ff', shot: '#ccffff' },
+            frost:    { outline: '#12303b', base: '#356276', dark: '#224556', light: '#60c6de', accent: '#d9fbff', shot: '#aaf4ff' },
+            flame:    { outline: '#2a1820', base: '#704251', dark: '#422836', light: '#e86f3d', accent: '#ffd36a', shot: '#ff9c3a' },
+            sniper:   { outline: '#182532', base: '#40586d', dark: '#253746', light: '#8ea9bd', accent: '#f4f5e7', shot: '#f8f8ff' },
+            ballista: { outline: '#1a2634', base: '#46536a', dark: '#2a3447', light: '#7da1c4', accent: '#b9e6ff', shot: '#e5f7ff' }
+        }[this.subType] || { outline: '#15202b', base: '#48515e', dark: '#26313d', light: '#8796a8', accent: '#d7e4f0', shot: '#f2dc64' };
+
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
 
         ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
-        ctx.beginPath();
-        ctx.ellipse(0, 16, 22, 7, 0, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.fillRect(-16, 12, 32, 6);
+        ctx.fillRect(-12, 18, 24, 2);
 
         this.renderTurretBase(ctx, palette);
         this.renderTurretTierMarkers(ctx, palette, tier);
@@ -2038,607 +2045,254 @@ export class Building {
 
         if (this.fireCooldown > this.fireRate * 0.65) {
             ctx.strokeStyle = palette.accent;
-            ctx.globalAlpha = 0.22 + tier * 0.05;
-            ctx.lineWidth = 1.5 + tier * 0.15;
-            ctx.beginPath();
-            ctx.arc(0, -4, 17 + tier, 0, Math.PI * 2);
-            ctx.stroke();
+            ctx.globalAlpha = 0.28 + tier * 0.04;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(-17, -17, 34, 34);
             ctx.globalAlpha = 1;
         }
+
+        ctx.restore();
     }
 
     renderTurretBase(ctx, p) {
-        // Low-profile sci-fi platform
+        // 16x16-inspired base: hard edges, 2px chunks, no smoothing.
+        ctx.fillStyle = p.outline;
+        ctx.fillRect(-14, 0, 28, 16);
+        ctx.fillRect(-10, -4, 20, 20);
+
         ctx.fillStyle = p.base;
-        ctx.strokeStyle = this.darkenColor(p.base);
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.roundRect(-18, 5, 36, 13, 5);
-        ctx.fill();
-        ctx.stroke();
+        ctx.fillRect(-12, 2, 24, 12);
+        ctx.fillRect(-8, -2, 16, 16);
 
-        // Pedestal
-        ctx.fillStyle = this.darkenColor(p.base);
-        ctx.beginPath();
-        ctx.roundRect(-8, -2, 16, 13, 3);
-        ctx.fill();
+        ctx.fillStyle = p.dark;
+        ctx.fillRect(-12, 10, 24, 4);
+        ctx.fillRect(-8, 14, 16, 2);
 
-        // Rotating top disk
-        ctx.fillStyle = p.top;
-        ctx.strokeStyle = this.darkenColor(p.top);
-        ctx.beginPath();
-        ctx.arc(0, 0, 13, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
+        ctx.fillStyle = p.light;
+        ctx.fillRect(-8, 0, 16, 4);
+        ctx.fillRect(-6, -6, 12, 10);
 
-        // Accent ring
-        ctx.strokeStyle = p.accent;
-        ctx.globalAlpha = 0.45;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, 8.5, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
+        ctx.fillStyle = p.outline;
+        ctx.fillRect(-8, -8, 16, 2);
+        ctx.fillRect(-8, -6, 2, 10);
+        ctx.fillRect(6, -6, 2, 10);
+        ctx.fillRect(-6, 4, 12, 2);
+
+        ctx.fillStyle = p.accent;
+        ctx.fillRect(-4, -4, 8, 6);
+        ctx.fillStyle = p.shot;
+        ctx.fillRect(-2, -2, 4, 2);
+    }
+
+    renderPixelDiamond(ctx, x, y, color, outline = '#13202c') {
+        ctx.fillStyle = outline;
+        ctx.fillRect(x - 2, y - 6, 4, 2);
+        ctx.fillRect(x - 6, y - 4, 12, 2);
+        ctx.fillRect(x - 8, y - 2, 16, 4);
+        ctx.fillRect(x - 6, y + 2, 12, 2);
+        ctx.fillRect(x - 2, y + 4, 4, 2);
+
+        ctx.fillStyle = color;
+        ctx.fillRect(x - 2, y - 4, 4, 2);
+        ctx.fillRect(x - 4, y - 2, 8, 4);
+        ctx.fillRect(x - 2, y + 2, 4, 2);
+    }
+
+    renderPixelFlame(ctx, x, y, outer, inner) {
+        ctx.fillStyle = outer;
+        ctx.fillRect(x - 2, y - 10, 4, 4);
+        ctx.fillRect(x - 6, y - 6, 12, 8);
+        ctx.fillRect(x - 4, y + 2, 8, 4);
+        ctx.fillStyle = inner;
+        ctx.fillRect(x - 2, y - 4, 4, 6);
+        ctx.fillRect(x - 4, y, 8, 2);
     }
 
     renderTurretTierMarkers(ctx, p, tier) {
         if (tier <= 1) return;
 
-        const pipCount = tier - 1; // L2..L5 => 1..4 pips
-        const arcStart = -Math.PI * 0.92;
-        const arcEnd = -Math.PI * 0.08;
-        const step = pipCount > 1 ? (arcEnd - arcStart) / (pipCount - 1) : 0;
-        const radius = 16.2;
+        const pipCount = tier - 1;
+        const startX = -((pipCount - 1) * 4) / 2;
 
+        ctx.fillStyle = p.outline;
+        ctx.fillRect(startX - 2, -18, pipCount * 4 + 2, 4);
+        ctx.strokeStyle = p.accent;
         ctx.fillStyle = p.accent;
-        ctx.strokeStyle = this.darkenColor(p.accent);
-        ctx.lineWidth = 1.2;
-
         for (let i = 0; i < pipCount; i++) {
-            const a = arcStart + step * i;
-            const x = Math.cos(a) * radius;
-            const y = Math.sin(a) * radius - 1;
-            ctx.beginPath();
-            ctx.roundRect(x - 2.6, y - 1.6, 5.2, 3.2, 1.4);
-            ctx.fill();
-            ctx.stroke();
-        }
-
-        if (tier >= 3) {
-            ctx.strokeStyle = p.accent;
-            ctx.globalAlpha = 0.4;
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.arc(0, 0, 11.2, -Math.PI * 0.85, -Math.PI * 0.15);
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-        }
-
-        if (tier >= 4) {
-            ctx.strokeStyle = p.accent;
-            ctx.globalAlpha = 0.22;
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.arc(0, 0, 15.2, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.globalAlpha = 1;
+            ctx.fillRect(startX + i * 4, -17, 2, 2);
         }
 
         if (tier >= 5) {
-            const pulse = 0.45 + Math.sin(Date.now() / 170) * 0.25;
-            ctx.fillStyle = '#f4fcff';
-            ctx.globalAlpha = pulse;
-            ctx.beginPath();
-            ctx.arc(0, 0, 2.2, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.globalAlpha = 1;
+            ctx.fillStyle = p.shot;
+            ctx.fillRect(-2, -22, 4, 2);
         }
     }
 
     renderBasicTurretHead(ctx, p) {
         const tier = Math.max(1, Math.min(5, this.level || 1));
         this.renderRotatedTurretPart(ctx, () => {
-            const bodyLen = 15 + tier;
-            ctx.fillStyle = p.top;
-            ctx.strokeStyle = '#2e3946';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.roundRect(0, -5, bodyLen, 10, 4);
-            ctx.fill();
-            ctx.stroke();
+            const len = 16 + tier * 2;
+            ctx.fillStyle = p.outline;
+            ctx.fillRect(-2, -6, len + 6, 12);
 
-            if (tier >= 2) {
-                ctx.fillStyle = this.darkenColor(p.top);
-                ctx.fillRect(2, -7, bodyLen - 6, 2);
-                ctx.fillRect(2, 5, bodyLen - 6, 2);
-            }
+            ctx.fillStyle = p.dark;
+            ctx.fillRect(0, -4, len, 8);
+            ctx.fillStyle = p.light;
+            ctx.fillRect(2, -2, len - 4, 4);
 
             ctx.fillStyle = p.accent;
-            ctx.fillRect(5, -2, 8 + tier, 4);
-
-            if (tier >= 3) {
-                ctx.fillStyle = '#e9f4ff';
-                ctx.globalAlpha = 0.35;
-                ctx.fillRect(7, -1, 7 + tier, 2);
-                ctx.globalAlpha = 1;
-            }
-
-            const muzzleX = bodyLen + 2;
-            ctx.fillStyle = '#17202b';
-            ctx.beginPath();
-            ctx.arc(muzzleX, 0, 3.2 + tier * 0.22, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillRect(6, -2, 6 + tier, 4);
 
             if (tier >= 4) {
-                ctx.strokeStyle = p.accent;
-                ctx.globalAlpha = 0.45;
-                ctx.lineWidth = 1.4;
-                ctx.beginPath();
-                ctx.arc(muzzleX, 0, 5.3, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.globalAlpha = 1;
+                ctx.fillStyle = p.shot;
+                ctx.fillRect(len - 2, -8, 4, 4);
+                ctx.fillRect(len - 2, 4, 4, 4);
             }
 
-            if (tier >= 5) {
-                ctx.fillStyle = p.accent;
-                ctx.beginPath();
-                ctx.moveTo(bodyLen - 2, -5.5);
-                ctx.lineTo(bodyLen + 3, -10);
-                ctx.lineTo(bodyLen + 5, -5.5);
-                ctx.closePath();
-                ctx.fill();
-                ctx.beginPath();
-                ctx.moveTo(bodyLen - 2, 5.5);
-                ctx.lineTo(bodyLen + 3, 10);
-                ctx.lineTo(bodyLen + 5, 5.5);
-                ctx.closePath();
-                ctx.fill();
-            }
+            ctx.fillStyle = '#111820';
+            ctx.fillRect(len, -4, 4, 8);
         });
     }
 
     renderLaserTurretHead(ctx, p) {
         const tier = Math.max(1, Math.min(5, this.level || 1));
         this.renderRotatedTurretPart(ctx, () => {
-            const pulse = 0.55 + Math.sin(Date.now() / 170) * 0.2;
-            const emitterLen = 16 + tier * 0.65;
-            const lensX = 10 + emitterLen;
+            const len = 18 + tier;
+            ctx.fillStyle = p.outline;
+            ctx.fillRect(-2, -6, len + 8, 12);
 
-            // Stabilizer spine
-            ctx.fillStyle = '#2a3c52';
-            ctx.strokeStyle = '#1b2a39';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.roundRect(-3, -4, 15 + tier, 8, 3);
-            ctx.fill();
-            ctx.stroke();
+            ctx.fillStyle = p.dark;
+            ctx.fillRect(0, -4, len, 8);
+            ctx.fillStyle = p.light;
+            ctx.fillRect(2, -2, len - 2, 4);
 
-            // Emitter chassis
-            ctx.fillStyle = p.top;
-            ctx.strokeStyle = '#29445a';
-            ctx.beginPath();
-            ctx.roundRect(8, -8, emitterLen, 16, 5);
-            ctx.fill();
-            ctx.stroke();
+            ctx.fillStyle = p.outline;
+            ctx.fillRect(len - 2, -8, 8, 16);
+            ctx.fillStyle = p.accent;
+            ctx.fillRect(len, -6, 4, 12);
+            ctx.fillStyle = p.shot;
+            ctx.fillRect(len + 4, -2, 6 + tier, 4);
 
-            // Side heat sinks for "laser device" readability
-            ctx.fillStyle = this.darkenColor(p.top);
-            const sinkCount = 3 + tier;
-            const sinkStep = emitterLen / (sinkCount + 1);
-            for (let i = 0; i < sinkCount; i++) {
-                const x = 9 + sinkStep * (i + 1);
-                ctx.fillRect(x, -9, 2, 3);
-                ctx.fillRect(x, 6, 2, 3);
-            }
-
-            // Focusing ring + glowing core lens
-            ctx.fillStyle = '#152635';
-            ctx.beginPath();
-            ctx.arc(lensX, 0, 6.2 + tier * 0.2, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = p.accent;
-            ctx.lineWidth = 1.8;
-            ctx.beginPath();
-            ctx.arc(lensX, 0, 4.5 + tier * 0.16, 0, Math.PI * 2);
-            ctx.stroke();
-
-            ctx.globalAlpha = 0.55 + pulse * 0.35;
-            ctx.fillStyle = '#d4fcff';
-            ctx.beginPath();
-            ctx.arc(lensX, 0, 2.3 + tier * 0.1, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.globalAlpha = 1;
-
-            // Short beam guide from lens
-            ctx.strokeStyle = `rgba(150, 250, 255, ${0.45 + pulse * 0.2})`;
-            ctx.lineWidth = 2.2;
-            ctx.beginPath();
-            ctx.moveTo(lensX + 4.5, 0);
-            ctx.lineTo(lensX + 8.5 + tier * 0.4, 0);
-            ctx.stroke();
-
-            if (tier >= 4) {
-                ctx.strokeStyle = p.accent;
-                ctx.globalAlpha = 0.38;
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.arc(lensX, 0, 8.5, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.globalAlpha = 1;
-            }
-
-            if (tier >= 5) {
+            for (let x = 4; x < len - 2; x += 5) {
                 ctx.fillStyle = p.accent;
-                ctx.beginPath();
-                ctx.moveTo(lensX - 2, -8.5);
-                ctx.lineTo(lensX + 3.5, -11.5);
-                ctx.lineTo(lensX + 2.5, -6.5);
-                ctx.closePath();
-                ctx.fill();
-                ctx.beginPath();
-                ctx.moveTo(lensX - 2, 8.5);
-                ctx.lineTo(lensX + 3.5, 11.5);
-                ctx.lineTo(lensX + 2.5, 6.5);
-                ctx.closePath();
-                ctx.fill();
+                ctx.fillRect(x, -8, 2, 2);
+                ctx.fillRect(x, 6, 2, 2);
             }
         });
 
-        // Energy crystal mounted on turret center
-        const crystalPulse = 0.6 + Math.sin(Date.now() / 210) * 0.2;
-        const crystalRadius = 8 + tier * 0.3;
-        ctx.fillStyle = p.accent;
-        ctx.beginPath();
-        ctx.moveTo(0, -11 - tier * 0.4);
-        ctx.lineTo(crystalRadius, 0);
-        ctx.lineTo(0, 11 + tier * 0.4);
-        ctx.lineTo(-crystalRadius, 0);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.globalAlpha = 0.25 + crystalPulse * 0.35;
-        ctx.fillStyle = '#e6fbff';
-        ctx.beginPath();
-        ctx.arc(0, 0, 2.6 + tier * 0.2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-
-        if (tier >= 3) {
-            ctx.strokeStyle = p.accent;
-            ctx.globalAlpha = 0.35;
-            ctx.lineWidth = 1.3;
-            ctx.beginPath();
-            ctx.arc(0, 0, 10 + tier * 0.5, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-        }
+        this.renderPixelDiamond(ctx, 0, -4, p.accent, p.outline);
     }
 
     renderFrostTurretHead(ctx, p) {
         const tier = Math.max(1, Math.min(5, this.level || 1));
         this.renderRotatedTurretPart(ctx, () => {
-            const bodyLen = 16 + tier * 1.2;
-            ctx.fillStyle = p.top;
-            ctx.strokeStyle = '#2f5a68';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.roundRect(-1, -4, bodyLen, 8, 3);
-            ctx.fill();
-            ctx.stroke();
+            const len = 14 + tier;
+            ctx.fillStyle = p.outline;
+            ctx.fillRect(-2, -6, len + 6, 12);
+            ctx.fillStyle = p.dark;
+            ctx.fillRect(0, -4, len, 8);
+            ctx.fillStyle = p.light;
+            ctx.fillRect(2, -2, len - 2, 4);
 
-            // Crystal barrel
             ctx.fillStyle = p.accent;
-            const crystalMid = bodyLen + 1;
-            const crystalTip = bodyLen + 8 + tier * 0.6;
-            ctx.beginPath();
-            ctx.moveTo(crystalMid, 0);
-            ctx.lineTo(crystalMid + 7, -5.2);
-            ctx.lineTo(crystalTip, 0);
-            ctx.lineTo(crystalMid + 7, 5.2);
-            ctx.closePath();
-            ctx.fill();
+            ctx.fillRect(len - 2, -6, 6, 12);
+            ctx.fillRect(len + 4, -4, 4, 8);
+            ctx.fillRect(len + 8, -2, 4 + tier, 4);
 
-            // Side icy fins
-            ctx.fillStyle = '#a8e9f4';
-            ctx.beginPath();
-            ctx.moveTo(8, -6);
-            ctx.lineTo(14 + tier, -10 - tier * 0.6);
-            ctx.lineTo(16 + tier * 0.7, -5);
-            ctx.closePath();
-            ctx.fill();
-            ctx.beginPath();
-            ctx.moveTo(8, 6);
-            ctx.lineTo(14 + tier, 10 + tier * 0.6);
-            ctx.lineTo(16 + tier * 0.7, 5);
-            ctx.closePath();
-            ctx.fill();
-
-            if (tier >= 4) {
-                ctx.strokeStyle = '#d8fbff';
-                ctx.globalAlpha = 0.45;
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.moveTo(bodyLen - 2, -8);
-                ctx.lineTo(bodyLen + 3, -12);
-                ctx.moveTo(bodyLen - 2, 8);
-                ctx.lineTo(bodyLen + 3, 12);
-                ctx.stroke();
-                ctx.globalAlpha = 1;
+            if (tier >= 3) {
+                ctx.fillStyle = p.shot;
+                ctx.fillRect(8, -10, 4, 4);
+                ctx.fillRect(8, 6, 4, 4);
             }
         });
 
-        ctx.strokeStyle = p.accent;
-        ctx.lineWidth = 1.8 + tier * 0.2;
-        const spokeCount = 4 + (tier >= 3 ? 2 : 0);
-        const spokeRadius = 9 + tier;
-        for (let i = 0; i < spokeCount; i++) {
-            const a = (Math.PI * 2 / spokeCount) * i + Math.PI / 4;
-            ctx.beginPath();
-            ctx.moveTo(0, -4);
-            ctx.lineTo(Math.cos(a) * spokeRadius, -4 + Math.sin(a) * spokeRadius);
-            ctx.stroke();
-        }
-        ctx.beginPath();
-        ctx.arc(0, -4, 3 + tier * 0.25, 0, Math.PI * 2);
-        ctx.fillStyle = '#dffbff';
-        ctx.fill();
-
-        if (tier >= 5) {
-            ctx.strokeStyle = '#e8feff';
-            ctx.globalAlpha = 0.32;
-            ctx.lineWidth = 1.4;
-            ctx.beginPath();
-            ctx.arc(0, -4, 13.5, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-        }
+        ctx.fillStyle = p.accent;
+        ctx.fillRect(-2, -14, 4, 20);
+        ctx.fillRect(-10, -6, 20, 4);
+        ctx.fillStyle = p.shot;
+        ctx.fillRect(-2, -6, 4, 4);
     }
 
     renderFlameTurretHead(ctx, p) {
         const tier = Math.max(1, Math.min(5, this.level || 1));
         this.renderRotatedTurretPart(ctx, () => {
-            const flicker = Math.sin(Date.now() / 110 + this.x * 0.03) * 0.16;
-            const nozzleLen = 7 + tier * 0.45;
+            const len = 16 + tier;
+            ctx.fillStyle = p.outline;
+            ctx.fillRect(-4, -8, len + 10, 16);
+            ctx.fillStyle = p.dark;
+            ctx.fillRect(-2, -6, len, 12);
+            ctx.fillStyle = p.light;
+            ctx.fillRect(2, -4, len - 2, 8);
 
-            // Rear fuel chamber
-            ctx.fillStyle = '#54364a';
-            ctx.strokeStyle = '#392539';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.roundRect(-4, -7, 13 + tier * 0.9, 14, 4);
-            ctx.fill();
-            ctx.stroke();
+            ctx.fillStyle = p.dark;
+            ctx.fillRect(len - 2, -6, 8, 12);
+            ctx.fillStyle = p.accent;
+            ctx.fillRect(len, -2, 6, 4);
 
-            // Main combustion body
-            ctx.fillStyle = p.top;
-            ctx.strokeStyle = '#6f3c43';
-            ctx.beginPath();
-            ctx.roundRect(7, -9, 16 + tier, 18, 7);
-            ctx.fill();
-            ctx.stroke();
-
-            // Coupling ring
-            ctx.fillStyle = '#2a2230';
-            ctx.beginPath();
-            ctx.roundRect(13, -10, 4, 20, 2);
-            ctx.fill();
-
-            // Nozzle (short + wide -> clearly a flamethrower)
-            ctx.fillStyle = '#3b2b34';
-            ctx.strokeStyle = '#231820';
-            const nozzleX = 21 + tier * 0.4;
-            ctx.beginPath();
-            ctx.roundRect(nozzleX, -5.5, nozzleLen, 11, 3);
-            ctx.fill();
-            ctx.stroke();
-
-            // Hot inner tube
-            ctx.fillStyle = '#ffb268';
-            ctx.globalAlpha = 0.55 + flicker * 0.6;
-            ctx.beginPath();
-            ctx.roundRect(nozzleX + 2, -2.2, nozzleLen - 2, 4.4, 2);
-            ctx.fill();
-            ctx.globalAlpha = 1;
-
-            // Pilot flame on muzzle
-            ctx.fillStyle = '#ffcc70';
-            ctx.beginPath();
-            ctx.moveTo(nozzleX + nozzleLen + 1, 0);
-            ctx.bezierCurveTo(
-                nozzleX + nozzleLen + 5 + flicker * 5 + tier * 0.5, -4,
-                nozzleX + nozzleLen + 5 + flicker * 6 + tier * 0.5, 4,
-                nozzleX + nozzleLen + 1, 0
-            );
-            ctx.fill();
-            ctx.fillStyle = '#ff7a3d';
-            ctx.beginPath();
-            ctx.moveTo(nozzleX + nozzleLen + 2, 0);
-            ctx.bezierCurveTo(
-                nozzleX + nozzleLen + 4 + flicker * 3, -2.2,
-                nozzleX + nozzleLen + 4 + flicker * 4, 2.2,
-                nozzleX + nozzleLen + 2, 0
-            );
-            ctx.fill();
-
-            if (tier >= 3) {
-                ctx.fillStyle = '#733a46';
-                ctx.beginPath();
-                ctx.roundRect(-1, -9.5, 6, 4, 2);
-                ctx.fill();
-                ctx.beginPath();
-                ctx.roundRect(-1, 5.5, 6, 4, 2);
-                ctx.fill();
-            }
-
-            if (tier >= 5) {
-                ctx.strokeStyle = '#ffcf7d';
-                ctx.globalAlpha = 0.35;
-                ctx.lineWidth = 1.6;
-                ctx.beginPath();
-                ctx.arc(nozzleX + nozzleLen * 0.6, 0, 9, -Math.PI * 0.55, Math.PI * 0.55);
-                ctx.stroke();
-                ctx.globalAlpha = 1;
+            if (this.fireCooldown > this.fireRate * 0.65 || tier >= 3) {
+                this.renderPixelFlame(ctx, len + 10, 0, p.shot, p.accent);
             }
         });
 
-        const coreFlicker = Math.sin(Date.now() / 120 + this.y * 0.02) * 0.18;
-        ctx.fillStyle = p.accent;
-        ctx.beginPath();
-        ctx.moveTo(0, -14);
-        ctx.bezierCurveTo(10, -5 + coreFlicker * 6, 7, 8, 0, 10);
-        ctx.bezierCurveTo(-8, 4, -5, -5 + coreFlicker * 5, 0, -14);
-        ctx.fill();
-
-        ctx.globalAlpha = 0.55;
-        ctx.fillStyle = '#ffe2a0';
-        ctx.beginPath();
-        ctx.moveTo(0, -8);
-        ctx.bezierCurveTo(5 + tier * 0.35, -3, 3 + tier * 0.2, 4 + tier * 0.3, 0, 6 + tier * 0.2);
-        ctx.bezierCurveTo(-4 - tier * 0.2, 3, -2 - tier * 0.2, -3, 0, -8);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-
-        if (tier >= 4) {
-            ctx.strokeStyle = '#ffd48d';
-            ctx.globalAlpha = 0.35;
-            ctx.lineWidth = 1.3;
-            ctx.beginPath();
-            ctx.arc(0, -2, 10 + tier, -Math.PI * 0.6, Math.PI * 0.6);
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-        }
+        this.renderPixelFlame(ctx, 0, -4, p.light, p.accent);
     }
 
     renderSniperTurretHead(ctx, p) {
         const tier = Math.max(1, Math.min(5, this.level || 1));
         this.renderRotatedTurretPart(ctx, () => {
-            const barrelLen = 27 + tier * 0.9;
-            ctx.fillStyle = p.top;
-            ctx.strokeStyle = '#2c3b49';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.roundRect(-2, -2.5, barrelLen, 5, 2);
-            ctx.fill();
-            ctx.stroke();
+            const len = 28 + tier * 2;
+            ctx.fillStyle = p.outline;
+            ctx.fillRect(-2, -4, len + 6, 8);
 
+            ctx.fillStyle = p.dark;
+            ctx.fillRect(0, -2, len, 4);
+            ctx.fillStyle = p.light;
+            ctx.fillRect(2, -1, len - 4, 2);
+
+            ctx.fillStyle = p.outline;
+            ctx.fillRect(8, -8, 14 + tier, 4);
             ctx.fillStyle = p.accent;
-            ctx.beginPath();
-            ctx.roundRect(9, -7, 9 + tier, 4, 2);
-            ctx.fill();
-            ctx.stroke();
-
-            if (tier >= 3) {
-                ctx.fillStyle = this.darkenColor(p.top);
-                ctx.beginPath();
-                ctx.roundRect(18, -8, 7 + tier, 3, 1.5);
-                ctx.fill();
-            }
+            ctx.fillRect(10, -7, 10 + tier, 2);
 
             if (tier >= 4) {
-                const brakeX = barrelLen - 2;
-                ctx.strokeStyle = p.accent;
-                ctx.lineWidth = 1.4;
-                ctx.beginPath();
-                ctx.moveTo(brakeX, -3.5);
-                ctx.lineTo(brakeX + 3.5, -3.5);
-                ctx.moveTo(brakeX, 3.5);
-                ctx.lineTo(brakeX + 3.5, 3.5);
-                ctx.stroke();
+                ctx.fillStyle = p.accent;
+                ctx.fillRect(len - 2, -6, 6, 2);
+                ctx.fillRect(len - 2, 4, 6, 2);
             }
 
-            // Precision muzzle
-            ctx.fillStyle = '#18212b';
-            ctx.beginPath();
-            ctx.arc(barrelLen + 1, 0, 2.2 + tier * 0.1, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillStyle = '#0d141b';
+            ctx.fillRect(len, -2, 4, 4);
         });
 
-        ctx.strokeStyle = p.accent;
-        ctx.lineWidth = 1.9 + tier * 0.1;
-        ctx.beginPath();
-        ctx.arc(0, -4, 8 + tier * 0.6, 0, Math.PI * 2);
-        ctx.moveTo(-10 - tier * 0.6, -4);
-        ctx.lineTo(10 + tier * 0.6, -4);
-        ctx.moveTo(0, -14 - tier * 0.5);
-        ctx.lineTo(0, 6 + tier * 0.4);
-        ctx.stroke();
-
-        if (tier >= 5) {
-            const ping = 0.3 + (Math.sin(Date.now() / 140) + 1) * 0.2;
-            ctx.strokeStyle = '#f6f8ff';
-            ctx.globalAlpha = ping;
-            ctx.lineWidth = 1.1;
-            ctx.beginPath();
-            ctx.arc(0, -4, 14, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-        }
+        ctx.fillStyle = p.accent;
+        ctx.fillRect(-10, -6, 20, 2);
+        ctx.fillRect(-10, 2, 20, 2);
+        ctx.fillRect(-2, -14, 4, 20);
     }
 
     renderBallistaTurretHead(ctx, p) {
         const tier = Math.max(1, Math.min(5, this.level || 1));
         this.renderRotatedTurretPart(ctx, () => {
-            const railEnd = 23 + tier;
-            const tipX = railEnd + 9;
+            const len = 22 + tier * 2;
+            ctx.fillStyle = p.outline;
+            ctx.fillRect(0, -8, len, 4);
+            ctx.fillRect(0, 4, len, 4);
+            ctx.fillRect(-2, -2, len + 8, 4);
 
-            // Sci-fi bolt launcher (fork + central rail)
-            ctx.strokeStyle = p.top;
-            ctx.lineWidth = 3.5;
-            ctx.lineCap = 'round';
-            ctx.beginPath();
-            ctx.moveTo(2, -6.5);
-            ctx.lineTo(railEnd, -2);
-            ctx.moveTo(2, 6.5);
-            ctx.lineTo(railEnd, 2);
-            ctx.stroke();
+            ctx.fillStyle = p.light;
+            ctx.fillRect(2, -6, len - 4, 2);
+            ctx.fillRect(2, 4, len - 4, 2);
+            ctx.fillStyle = p.accent;
+            ctx.fillRect(0, -1, len + 4, 2);
 
-            ctx.strokeStyle = p.accent;
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(-2, 0);
-            ctx.lineTo(railEnd + 3, 0);
-            ctx.stroke();
+            ctx.fillStyle = p.shot;
+            ctx.fillRect(len + 4, -4, 4, 8);
+            ctx.fillRect(len + 8, -2, 4, 4);
 
             if (tier >= 3) {
-                ctx.strokeStyle = this.darkenColor(p.accent);
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.moveTo(8, -4);
-                ctx.lineTo(railEnd - 2, -1.2);
-                ctx.moveTo(8, 4);
-                ctx.lineTo(railEnd - 2, 1.2);
-                ctx.stroke();
-            }
-
-            if (tier >= 4) {
-                ctx.strokeStyle = p.accent;
-                ctx.globalAlpha = 0.35;
-                ctx.lineWidth = 1.6;
-                ctx.beginPath();
-                ctx.arc(railEnd - 7, 0, 6, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.globalAlpha = 1;
-            }
-
-            // Spike bolt tip
-            ctx.fillStyle = '#d9f0ff';
-            ctx.beginPath();
-            ctx.moveTo(tipX, 0);
-            ctx.lineTo(railEnd + 2, -4.3);
-            ctx.lineTo(railEnd + 2, 4.3);
-            ctx.closePath();
-            ctx.fill();
-
-            if (tier >= 5) {
-                ctx.fillStyle = '#eef9ff';
-                ctx.globalAlpha = 0.65;
-                ctx.beginPath();
-                ctx.moveTo(tipX + 4, 0);
-                ctx.lineTo(tipX - 1, -2.5);
-                ctx.lineTo(tipX - 1, 2.5);
-                ctx.closePath();
-                ctx.fill();
-                ctx.globalAlpha = 1;
+                ctx.fillStyle = p.dark;
+                ctx.fillRect(8, -4, 12, 2);
+                ctx.fillRect(8, 2, 12, 2);
             }
         });
     }

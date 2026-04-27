@@ -2704,7 +2704,9 @@ export class Game {
      * Add a particle effect
      */
     addParticle(particle) {
-        this.particles.push(particle);
+        if (this.particles.length < 400) {
+            this.particles.push(particle);
+        }
     }
 
     /**
