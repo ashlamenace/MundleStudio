@@ -3224,6 +3224,8 @@ export class Game {
     checkWorkbenchInteraction() {
         if (!this.input.isActionJustPressed('interact')) return;
 
+        if (this.tryOpenNearbyBuildingUpgrade()) return;
+
         const workbenches = this.buildingSystem.buildings.filter(b => b.type === 'workbench');
         for (const wb of workbenches) {
             const dist = Utils.distance(this.player.x, this.player.y, wb.x, wb.y);
@@ -3232,6 +3234,25 @@ export class Game {
                 return;
             }
         }
+    }
+
+    tryOpenNearbyBuildingUpgrade() {
+        if (!this.buildingSystem || this.buildingSystem.isPlacing || this.buildMenu?.isOpen) return false;
+
+        let nearest = null;
+        let nearestDist = Infinity;
+        for (const building of this.buildingSystem.buildings) {
+            if (!building || building.destroyed || !building.canUpgrade || building.level >= building.maxLevel) continue;
+            const dist = Utils.distance(this.player.x, this.player.y, building.x, building.y);
+            if (dist < 82 && dist < nearestDist) {
+                nearest = building;
+                nearestDist = dist;
+            }
+        }
+
+        if (!nearest) return false;
+        this.openBuildingUpgradeModal(nearest);
+        return true;
     }
 
     /**

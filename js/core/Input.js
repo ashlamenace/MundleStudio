@@ -35,6 +35,7 @@ export class Input {
         this.touchMode = false;
         this.pointerAimActive = false;
         this.hasPointerAim = false;
+        this.lastPointerAimAt = 0;
 
         // Key bindings (AZERTY and QWERTY support)
         this.bindings = {
@@ -168,6 +169,7 @@ export class Input {
         this.mouse.x = clientX - rect.left;
         this.mouse.y = clientY - rect.top;
         this.hasPointerAim = true;
+        this.lastPointerAimAt = performance.now();
     }
 
     _setupMobileControls() {

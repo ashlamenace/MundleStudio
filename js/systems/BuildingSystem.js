@@ -2993,18 +2993,28 @@ export class BuildingSystem {
      */
     updatePreview() {
         const mouse = this.game.input.mouse;
+        const input = this.game.input;
         const config = BuildingConfigs[this.selectedBuilding];
+        const usePlayerForwardPreview = input?.touchMode &&
+            !input.pointerAimActive &&
+            (!input.hasPointerAim || performance.now() - input.lastPointerAimAt > 1500);
+        const pointerWorld = usePlayerForwardPreview
+            ? {
+                x: this.game.player.x + Math.cos(this.game.player.facingAngle || 0) * 96,
+                y: this.game.player.y + Math.sin(this.game.player.facingAngle || 0) * 96
+            }
+            : { x: mouse.worldX, y: mouse.worldY };
 
         // Snap to grid - adjust for building size
         if (config && config.size > this.gridSize) {
             // For 2x2 buildings (64x64), snap to even grid positions
             const gridMultiple = config.size / this.gridSize; // 2 for 64x64
-            this.previewX = Math.floor(mouse.worldX / config.size) * config.size + config.size / 2;
-            this.previewY = Math.floor(mouse.worldY / config.size) * config.size + config.size / 2;
+            this.previewX = Math.floor(pointerWorld.x / config.size) * config.size + config.size / 2;
+            this.previewY = Math.floor(pointerWorld.y / config.size) * config.size + config.size / 2;
         } else {
             // Normal 1x1 buildings
-            this.previewX = Math.floor(mouse.worldX / this.gridSize) * this.gridSize + this.gridSize / 2;
-            this.previewY = Math.floor(mouse.worldY / this.gridSize) * this.gridSize + this.gridSize / 2;
+            this.previewX = Math.floor(pointerWorld.x / this.gridSize) * this.gridSize + this.gridSize / 2;
+            this.previewY = Math.floor(pointerWorld.y / this.gridSize) * this.gridSize + this.gridSize / 2;
         }
 
         // Check if can place
