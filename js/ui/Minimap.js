@@ -58,8 +58,9 @@ export class Minimap {
         };
 
         const onDown = (e) => {
-            if (e.button !== 0) return;
+            if (e.button !== undefined && e.button !== 0) return;
             this._panning = true;
+            this.canvas.setPointerCapture?.(e.pointerId);
             const { mx, my } = getMinimapXY(e);
             const w = this._minimapToWorld(mx, my);
             this.panWorldX = w.x;
@@ -83,6 +84,22 @@ export class Minimap {
         this.canvas.addEventListener('mousedown', onDown);
         window.addEventListener('mousemove', onMove);
         window.addEventListener('mouseup', onUp);
+        this.canvas.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'mouse') return;
+            onDown(e);
+        }, { passive: false });
+        window.addEventListener('pointermove', (e) => {
+            if (e.pointerType === 'mouse') return;
+            onMove(e);
+        }, { passive: false });
+        window.addEventListener('pointerup', (e) => {
+            if (e.pointerType === 'mouse') return;
+            onUp();
+        });
+        window.addEventListener('pointercancel', (e) => {
+            if (e.pointerType === 'mouse') return;
+            onUp();
+        });
     }
 
     /** Recompute scale/offset from world dimensions. */

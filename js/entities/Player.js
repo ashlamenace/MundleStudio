@@ -592,6 +592,7 @@ export class Player extends Entity {
             this.useTool(tool);
         } else if (tool.type === 'build') {
             // Building placement is handled by BuildingSystem directly
+            this.game.buildingSystem.updatePreview();
             this.game.buildingSystem.tryPlace();
         }
 
