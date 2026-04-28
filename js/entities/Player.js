@@ -385,6 +385,21 @@ export class Player extends Entity {
             this.invincibleTime -= deltaTime;
         }
 
+        // Burn DoT from PvP fire arrows
+        if (this._burnTimer !== undefined && this._burnDuration > 0) {
+            this._burnTimer += deltaTime;
+            if (this._burnTimer >= 1.0) {
+                this._burnTimer -= 1.0;
+                this.takeDamage(this._burnDamage || 4, { type: 'burn' });
+                this._burnDuration -= 1.0;
+                if (this._burnDuration <= 0) {
+                    this._burnDamage = 0;
+                    this._burnDuration = 0;
+                    this._burnTimer = 0;
+                }
+            }
+        }
+
         // Regen
         if (this.health < this.maxHealth) {
             const before = this.health;

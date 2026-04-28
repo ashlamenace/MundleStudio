@@ -4,14 +4,16 @@ const { spawn, spawnSync } = require('child_process');
 const dns = require('dns');
 const http = require('http');
 const https = require('https');
+const net = require('net');
 const fs = require('fs');
 const path = require('path');
 
 const rootDir = path.resolve(__dirname, '..');
 const hostingDir = path.join(rootDir, '.codex-hosting');
-const port = Number(process.env.PORT || 3000);
+const preferredPort = Number(process.env.PORT || 3000);
 const wsPath = process.env.WS_PATH || '/ws';
-const tunnelOrigin = `http://127.0.0.1:${port}`;
+let activePort = preferredPort;
+let tunnelOrigin = `http://127.0.0.1:${activePort}`;
 const publicUrlRegex = /https:\/\/[-a-z0-9]+\.trycloudflare\.com/ig;
 const shouldOpenBrowser = process.env.OPEN_BROWSER !== '0';
 const publicReadyTimeoutMs = Number(process.env.PUBLIC_READY_TIMEOUT_MS || 120000);
@@ -26,6 +28,34 @@ let shuttingDown = false;
 let serverProcess = null;
 let tunnelProcess = null;
 let publicUrlFound = false;
+
+function canBindPort(port) {
+    return new Promise((resolve) => {
+        const tester = net.createServer();
+
+        tester.once('error', () => {
+            resolve(false);
+        });
+
+        tester.once('listening', () => {
+            tester.close(() => resolve(true));
+        });
+
+        // Match server.js behavior (wildcard listen) so EADDRINUSE is detected reliably.
+        tester.listen(port);
+    });
+}
+
+async function findAvailablePort(startPort, maxAttempts = 20) {
+    for (let i = 0; i < maxAttempts; i++) {
+        const candidate = startPort + i;
+        // eslint-disable-next-line no-await-in-loop
+        if (await canBindPort(candidate)) {
+            return candidate;
+        }
+    }
+    throw new Error(`Aucun port libre trouve entre ${startPort} et ${startPort + maxAttempts - 1}.`);
+}
 
 function findCloudflared() {
     const envPath = process.env.CLOUDFLARED_BIN;
@@ -102,6 +132,10 @@ function downloadFile(url, destination, redirectsLeft = 5) {
 async function ensureCloudflared() {
     const envPath = process.env.CLOUDFLARED_BIN;
     if (envPath && fs.existsSync(envPath)) return envPath;
+
+    // Prefer system cloudflared (e.g. installed via WinGet/brew) over bundled download.
+    const systemBin = findSystemCloudflared();
+    if (systemBin && !forceCloudflaredDownload) return systemBin;
 
     if (process.platform === 'win32') {
         if (!fs.existsSync(bundledCloudflared) || !fs.existsSync(bundledCloudflaredMarker) || forceCloudflaredDownload) {
@@ -257,8 +291,111 @@ function attachTunnelUrlReporter(stream, localReadyPromise) {
     });
 }
 
+function checkSystemDnsOnce(hostname) {
+    return new Promise((resolve) => {
+        dns.lookup(hostname, (err, address) => resolve(err ? null : address));
+    });
+}
+
+function resolveViaPublicDns(hostname) {
+    // Try 8.8.8.8 first; if intercepted/blocked, fall back to resolving the parent domain
+    // via system DNS (trycloudflare.com uses a wildcard → same edge IPs for all subdomains).
+    return new Promise((resolve) => {
+        const resolver = new dns.Resolver();
+        resolver.setServers(['8.8.8.8', '1.1.1.1']);
+        resolver.resolve4(hostname, (err, addrs) => {
+            if (!err && addrs && addrs.length) { resolve(addrs[0]); return; }
+            // Fallback: resolve parent domain via system DNS
+            const parent = hostname.split('.').slice(1).join('.');
+            dns.lookup(parent, (err2, address) => resolve(err2 ? null : address));
+        });
+    });
+}
+
+function tryAddHostsEntry(hostname, ip) {
+    const hostsPath = process.platform === 'win32'
+        ? 'C:\\Windows\\System32\\drivers\\etc\\hosts'
+        : '/etc/hosts';
+    const entry = `${ip}  ${hostname}  # crystal-guardian-tunnel\n`;
+    try {
+        const current = fs.readFileSync(hostsPath, 'utf8');
+        if (current.includes(hostname)) return true; // already there
+        fs.appendFileSync(hostsPath, entry);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function removeHostsEntry(hostname) {
+    const hostsPath = process.platform === 'win32'
+        ? 'C:\\Windows\\System32\\drivers\\etc\\hosts'
+        : '/etc/hosts';
+    try {
+        const lines = fs.readFileSync(hostsPath, 'utf8').split(/\r?\n/);
+        const filtered = lines.filter(l => !l.includes(hostname));
+        fs.writeFileSync(hostsPath, filtered.join('\n'));
+    } catch { /* ignore */ }
+}
+
+let hostsEntryHostname = null;
+
 async function reportPublicUrlWhenReady(publicUrl, localReadyPromise) {
     await localReadyPromise;
+
+    const hostname = new URL(publicUrl).hostname;
+
+    console.log('');
+    console.log(`Tunnel detecte : ${publicUrl}`);
+    console.log('Verification de la disponibilite...');
+
+    try {
+        await waitForPublicReady(publicUrl);
+    } catch (err) {
+        console.warn(`[AVERT] Accessibilite externe non confirmee : ${err.message}`);
+    }
+
+    // Check if local system DNS can resolve the hostname.
+    const systemIp = await checkSystemDnsOnce(hostname);
+    let localDnsOk = systemIp !== null;
+
+    if (!localDnsOk) {
+        // System DNS filters this domain (common on university/corporate networks).
+        // Resolve via 8.8.8.8 and try to patch the hosts file so this machine can access the URL.
+        const edgeIp = await resolveViaPublicDns(hostname);
+
+        if (edgeIp) {
+            const patched = tryAddHostsEntry(hostname, edgeIp);
+            if (patched) {
+                hostsEntryHostname = hostname;
+                localDnsOk = true;
+                console.log(`[OK] Entree temporaire ajoutee dans le fichier hosts (${edgeIp} -> ${hostname}).`);
+                console.log('     Cette entree sera supprimee a la fermeture du script.');
+            } else {
+                console.log('');
+                console.log('================================================');
+                console.log('ATTENTION : DNS reseau filtre trycloudflare.com');
+                console.log('================================================');
+                console.log('  Le DNS de ton reseau bloque les sous-domaines trycloudflare.com.');
+                console.log('  Tes amis sur d autres reseaux (domicile, 4G) peuvent acceder');
+                console.log('  a l URL normalement. Pour y acceder depuis CE PC, choisis :');
+                console.log('');
+                if (edgeIp) {
+                    console.log('  Option 1 — Relancer start.ps1 en tant qu Administrateur (clic droit)');
+                    console.log('    Le script ajoutera automatiquement une entree dans le fichier hosts');
+                    console.log(`    (${edgeIp}  ${hostname})`);
+                    console.log('    et la supprimera a la fermeture.');
+                    console.log('');
+                }
+                console.log('  Option 2 — Changer le DNS Windows en 8.8.8.8 :');
+                console.log('    Parametres > Reseau > Wi-Fi > Proprietes du reseau');
+                console.log('    > Attribution du serveur DNS : Manuel > IPv4 : 8.8.8.8');
+                console.log('');
+                console.log('  Option 3 — Tester depuis ton telephone en point d acces');
+                console.log('================================================');
+            }
+        }
+    }
 
     console.log('');
     console.log('================================================');
@@ -280,17 +417,6 @@ async function reportPublicUrlWhenReady(publicUrl, localReadyPromise) {
     if (shouldOpenBrowser) {
         openBrowser(publicUrl);
     }
-
-    // Validation en arriere-plan — affiche un message de confirmation ou d'alerte.
-    waitForPublicReady(publicUrl).then(() => {
-        console.log('[OK] URL publique confirmee accessible depuis l exterieur.');
-    }).catch((err) => {
-        console.warn('');
-        console.warn('[AVERT] La verification automatique d acces a echoue :');
-        console.warn(`        ${err.message}`);
-        console.warn('        Le lien fonctionne peut-etre quand meme — teste-le manuellement.');
-        console.warn('');
-    });
 }
 
 function openBrowser(url) {
@@ -315,6 +441,10 @@ async function shutdown(code = 0) {
     if (shuttingDown) return;
     shuttingDown = true;
 
+    if (hostsEntryHostname) {
+        removeHostsEntry(hostsEntryHostname);
+    }
+
     for (const child of [tunnelProcess, serverProcess]) {
         if (child && !child.killed) {
             child.kill('SIGTERM');
@@ -332,6 +462,13 @@ async function shutdown(code = 0) {
 }
 
 async function main() {
+    activePort = await findAvailablePort(preferredPort);
+    tunnelOrigin = `http://127.0.0.1:${activePort}`;
+
+    if (activePort !== preferredPort) {
+        console.warn(`[WARN] Port ${preferredPort} deja utilise, bascule automatique vers ${activePort}.`);
+    }
+
     const cloudflaredBin = await ensureCloudflared();
     if (!cloudflaredBin) {
         console.error('cloudflared est introuvable.');
@@ -352,7 +489,7 @@ async function main() {
 
     serverProcess = spawn(process.execPath, [path.join(rootDir, 'server.js')], {
         cwd: rootDir,
-        env: { ...process.env, PORT: String(port), WS_PATH: wsPath },
+        env: { ...process.env, PORT: String(activePort), WS_PATH: wsPath },
         stdio: ['ignore', 'pipe', 'pipe']
     });
 
@@ -368,14 +505,20 @@ async function main() {
 
     const readyPromise = waitForHttpReady();
 
+    // Force HTTP/2 transport to avoid QUIC/UDP being blocked by firewalls/routers.
+    // cloudflared defaults to QUIC but many networks block UDP 7844 outbound.
+    const cfgPath = path.join(hostingDir, '_http2.yml');
+    fs.writeFileSync(cfgPath, 'protocol: http2\n');
+
     tunnelProcess = spawn(cloudflaredBin, [
         'tunnel',
         '--no-autoupdate',
+        '--config', cfgPath,
         '--url',
         tunnelOrigin
     ], {
         cwd: rootDir,
-        env: process.env,
+        env: { ...process.env, TUNNEL_TRANSPORT_PROTOCOL: 'http2' },
         stdio: ['ignore', 'pipe', 'pipe']
     });
 

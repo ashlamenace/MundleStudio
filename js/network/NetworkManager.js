@@ -357,26 +357,21 @@ export class NetworkManager {
                 }
                 break;
 
-            // ── Crystal upgrade ──
+            // ── Crystal upgrade (co-op only — versus upgrades are local) ──
             case 'CRYSTAL_DEPOSIT':
-                // Host accumulates deposits from clients
-                if (this.isHost && game.crystalUpgradeSystem) {
+                if (this.isHost && game.crystalUpgradeSystem && game.gameMode !== 'versus_ffa') {
                     game.crystalUpgradeSystem.receiveDeposit(msg.amounts ?? {});
                 }
                 break;
 
             case 'CRYSTAL_UPGRADED':
-                // All players (including host re-receive for consistency)
-                if (game.crystalUpgradeSystem) {
-                    if (!this.isHost) {
-                        game.crystalUpgradeSystem.receiveUpgrade(msg.level);
-                    }
+                if (!this.isHost && game.crystalUpgradeSystem && game.gameMode !== 'versus_ffa') {
+                    game.crystalUpgradeSystem.receiveUpgrade(msg.level);
                 }
                 break;
 
             case 'CRYSTAL_SYNC':
-                // State sync when joining mid-game
-                if (!this.isHost && game.crystalUpgradeSystem) {
+                if (!this.isHost && game.crystalUpgradeSystem && game.gameMode !== 'versus_ffa') {
                     game.crystalUpgradeSystem.receiveSync(msg.level, msg.deposits ?? {});
                 }
                 break;
@@ -846,7 +841,9 @@ export class NetworkManager {
             damage,
             damageType: payload?.damageType ?? 'melee',
             slowFactor: payload?.slowFactor ?? 0,
-            slowDuration: payload?.slowDuration ?? 0
+            slowDuration: payload?.slowDuration ?? 0,
+            specialEffect: payload?.specialEffect ?? null,
+            bowTier: payload?.bowTier ?? 1
         });
     }
 
@@ -912,9 +909,9 @@ export class NetworkManager {
         this.broadcastBuildingResync();
         this.broadcastVersusMatchState();
         this.broadcastSkipToNightVoteState();
-        // Sync crystal upgrade state to all clients
+        // Sync crystal upgrade state (co-op only — versus crystals are per-player)
         const upSys = this.game.crystalUpgradeSystem;
-        if (upSys) {
+        if (upSys && this.game.gameMode !== 'versus_ffa') {
             this._relayAll({ type: 'CRYSTAL_SYNC', level: upSys.level, deposits: { ...upSys.deposits } });
         }
     }
@@ -951,6 +948,7 @@ export class NetworkManager {
             wave      : waveNum,
             active    : isActive,
             spawnLeft : (ws?.spawnQueue?.length ?? 0) + (ws?.bonusSpawnQueue?.length ?? 0),
+            waveType  : ws?.currentWaveType ?? 'mixed',
         });
     }
 

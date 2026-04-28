@@ -1079,9 +1079,10 @@ export class Enemy extends Entity {
 
     shouldAttackBlockingBuilding(building) {
         if (!building || building.destroyed) return false;
-        // Attack wall-like obstacles in path regardless of current target —
-        // walls are only useful as barriers if enemies actually have to break them.
-        return this.classifyTarget(building) === 'wall';
+        const cat = this.classifyTarget(building);
+        // Attack walls AND economy buildings (collectors) that block the path.
+        // Without this, auto-miners act as indestructible walls.
+        return cat === 'wall' || cat === 'economy';
     }
 
     /**

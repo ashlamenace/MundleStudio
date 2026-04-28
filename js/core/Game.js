@@ -98,7 +98,7 @@ export class Game {
             requiredIds: []
         };
         this.bonusRaidOffer = null;
-        this._bonusRaidOfferCooldown = 0;
+        this._bonusRaidOfferCooldown = 90; // First offer only after 90s
 
         // Initialize core systems
         this.input = new Input(canvas);
@@ -454,7 +454,7 @@ export class Game {
 
     resetBonusRaidOffer() {
         this.bonusRaidOffer = null;
-        this._bonusRaidOfferCooldown = 18 + Math.random() * 24;
+        this._bonusRaidOfferCooldown = 50 + Math.random() * 40;
     }
 
     getBonusRaidTargetSlots(attackerSlot = this.playerSlot ?? this.resolvePlayerSlot()) {
@@ -473,7 +473,7 @@ export class Game {
         if (this.bonusRaidOffer) {
             if (now >= this.bonusRaidOffer.expiresAt) {
                 this.bonusRaidOffer = null;
-                this._bonusRaidOfferCooldown = 28 + Math.random() * 42;
+                this._bonusRaidOfferCooldown = 70 + Math.random() * 50;
             }
             return;
         }
@@ -546,16 +546,16 @@ export class Game {
             this.receiveBonusRaidRequest(this.networkManager?.playerId ?? 'local', payload);
         }
 
-        this.showNotification('Raid envoye', 'Une vague bonus part chez les adversaires.', '#ffb347', 2);
+        this.showNotification('Raid envoyé', 'Une vague bonus part chez les adversaires.', '#ffb347', 2);
         this.bonusRaidOffer = null;
-        this._bonusRaidOfferCooldown = 42 + Math.random() * 46;
+        this._bonusRaidOfferCooldown = 90 + Math.random() * 60;
         return true;
     }
 
     declineBonusRaidOffer() {
         if (!this.bonusRaidOffer) return;
         this.bonusRaidOffer = null;
-        this._bonusRaidOfferCooldown = 24 + Math.random() * 34;
+        this._bonusRaidOfferCooldown = 60 + Math.random() * 60;
     }
 
     receiveBonusRaidRequest(attackerId = null, payload = {}) {
@@ -655,11 +655,24 @@ export class Game {
         if (targetSlot === localSlot) {
             this.player.takeDamage(damage, { type: 'remotePlayer', playerId: attackerId });
 
-            const slowFactor = Math.max(0, Math.min(0.6, Number(data?.slowFactor ?? 0)));
+            const slowFactor = Math.max(0, Math.min(0.65, Number(data?.slowFactor ?? 0)));
             const slowDuration = Math.max(0, Number(data?.slowDuration ?? 0));
             if (slowFactor > 0 && slowDuration > 0) {
                 this.player._enemySlowFactor = Math.max(this.player._enemySlowFactor || 0, slowFactor);
                 this.player._enemySlowUntil = Date.now() + (slowDuration * 1000);
+            }
+
+            // Elemental bow effects applied to local player when hit
+            const fx = data?.specialEffect;
+            if (fx === 'fire') {
+                // Burn DoT: 4 DPS for 3-4s
+                const bowTier = Number(data?.bowTier ?? 1);
+                this.player._burnDamage = bowTier >= 5 ? 6 : 4;
+                this.player._burnDuration = bowTier >= 5 ? 4.0 : 3.0;
+                this.player._burnTimer = 0;
+            } else if (fx === 'lightning') {
+                // Extra instant chain damage (20% more)
+                this.player.takeDamage(damage * 0.2, { type: 'remotePlayer', playerId: attackerId });
             }
             return;
         }

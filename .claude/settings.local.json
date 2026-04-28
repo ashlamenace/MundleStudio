@@ -25,7 +25,10 @@
       "Bash(node *)",
       "Bash(nslookup *)",
       "Bash(curl *)",
-      "PowerShell(Stop-Process *)"
+      "PowerShell(Stop-Process *)",
+      "Bash(git fetch *)",
+      "Bash(git stash *)",
+      "Bash(git pull *)"
     ]
   }
 }

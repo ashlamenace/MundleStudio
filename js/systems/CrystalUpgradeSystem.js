@@ -172,9 +172,10 @@ export class CrystalUpgradeSystem {
         // Floating deposit text above crystal
         this._spawnDepositText(deposited);
 
-        // Multiplayer client → send to host, host decides when to upgrade
+        // In versus mode each player upgrades their own crystal independently.
+        // In co-op, the host is authoritative: clients send deposits and wait.
         const nm = this.game.networkManager;
-        if (nm?.inRoom && !nm.isHost) {
+        if (nm?.inRoom && !nm.isHost && this.game.gameMode !== 'versus_ffa') {
             nm.sendCrystalDeposit(deposited);
             return; // host will call _doUpgrade via broadcastCrystalUpgrade
         }
@@ -256,8 +257,9 @@ export class CrystalUpgradeSystem {
         this._spawnUpgradeBurst();
         this.game.buildMenu?.renderItems();
 
+        // Broadcast upgrade to co-op teammates only; versus upgrades are local.
         const nm = this.game.networkManager;
-        if (nm?.isHost && nm.inRoom) {
+        if (nm?.isHost && nm.inRoom && this.game.gameMode !== 'versus_ffa') {
             nm.broadcastCrystalUpgrade(this.level);
         }
     }

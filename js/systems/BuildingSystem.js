@@ -12,12 +12,12 @@ import { Projectile } from '../entities/Projectile.js';
 export const TURRET_CAPS = [0, 3, 5, 6, 8, 10];
 
 // Production rates in resources/second per level.
-// Lower values prevent miners from trivialising the resource economy —
-// players must still rely on wave rewards and cave exploration.
+// Level 2 and 3 upgrades are now strictly better than building an extra miner at level 1,
+// so upgrading is always the profitable choice once you have the resources.
 export const AUTO_MINER_PRODUCTION_RATES = {
-    woodMiner:  [0.10, 0.18, 0.28],   // was [0.25, 0.5,  0.8 ] — 6/9/17 per min
-    stoneMiner: [0.08, 0.14, 0.22],   // was [0.2,  0.4,  0.65] — 5/8/13 per min
-    metalMiner: [0.05, 0.10, 0.16]    // was [0.12, 0.25, 0.4 ] — 3/6/10 per min
+    woodMiner:  [0.10, 0.27, 0.55],   // 6 / 16 / 33 per min — upgrade 2x then 3.4x base
+    stoneMiner: [0.08, 0.22, 0.44],   // 5 / 13 / 26 per min
+    metalMiner: [0.05, 0.14, 0.28]    // 3 /  8 / 17 per min
 };
 
 const AUTO_MINER_AUTO_DELIVER_INTERVAL = 60;  // was 40 s — less frequent auto-delivery
@@ -2887,9 +2887,22 @@ export class BuildingSystem {
         this.gridSize = 32;
     }
 
-    /** Number of placed (non-destroyed) turrets */
+    /** Number of placed (non-destroyed) turrets owned by the local player */
     getTurretCount() {
-        return this.buildings.filter(b => b.type === 'turret' && !b.destroyed).length;
+        const myId = this.game.networkManager?.playerId ?? null;
+        return this.buildings.filter(b => {
+            if (b.type !== 'turret' || b.destroyed) return false;
+            return myId ? b.ownerId === myId : true;
+        }).length;
+    }
+
+    /** Number of placed (non-destroyed) auto-miners owned by the local player */
+    getAutoMinerCount() {
+        const myId = this.game.networkManager?.playerId ?? null;
+        return this.buildings.filter(b => {
+            if (b.type !== 'autoMiner' || b.destroyed) return false;
+            return myId ? b.ownerId === myId : true;
+        }).length;
     }
 
     /** Maximum turrets allowed at current crystal level */
@@ -2914,7 +2927,7 @@ export class BuildingSystem {
             return;
         }
 
-        // Turret cap gate
+        // Turret cap gate (per-player)
         const config = BuildingConfigs[buildingKey];
         if (config?.type === 'turret') {
             const cap   = this.getTurretCap();
@@ -2923,6 +2936,20 @@ export class BuildingSystem {
                 this.game.showNotification(
                     `Tourelles : ${count}/${cap}`,
                     'Limite atteinte — améliore le cristal pour en poser davantage.',
+                    '#ff9944', 2
+                );
+                return;
+            }
+        }
+
+        // Auto-miner cap gate (per-player, max 5 total)
+        if (config?.type === 'autoMiner') {
+            const minerCap = 5;
+            const minerCount = this.getAutoMinerCount();
+            if (minerCount >= minerCap) {
+                this.game.showNotification(
+                    `Collecteurs : ${minerCount}/${minerCap}`,
+                    'Limite atteinte — améliore tes collecteurs existants.',
                     '#ff9944', 2
                 );
                 return;

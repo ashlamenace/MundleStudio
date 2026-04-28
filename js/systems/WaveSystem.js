@@ -81,7 +81,10 @@ export class WaveSystem {
             switch (config.waveType) {
                 case 'swarm':
                     // Many weak enemies; pressure comes from target switching and leaks.
-                    config.enemies = this.fillEnemies(['grunt', 'grunt', 'speeder', 'speeder'], Math.floor(baseCount * 1.45));
+                    {
+                        const swarmMultiplier = i <= 3 ? 1.15 : i <= 9 ? 1.25 : 1.45;
+                        config.enemies = this.fillEnemies(['grunt', 'grunt', 'speeder', 'speeder'], Math.floor(baseCount * swarmMultiplier));
+                    }
                     break;
 
                 case 'elite':
@@ -91,7 +94,12 @@ export class WaveSystem {
 
                 case 'ranged':
                     // Ranged attackers arrive earlier, but still mixed with low HP units.
-                    config.enemies = this.fillEnemies(['speeder', 'poisonFrog', 'fireImp', 'grunt'], Math.floor(baseCount * 0.95));
+                    {
+                        const rangedPool = i < 7
+                            ? ['speeder', 'speeder', 'poisonFrog', 'grunt', 'grunt']
+                            : ['speeder', 'poisonFrog', 'fireImp', 'grunt'];
+                        config.enemies = this.fillEnemies(rangedPool, Math.floor(baseCount * 0.9));
+                    }
                     break;
 
                 case 'siege':
@@ -99,8 +107,11 @@ export class WaveSystem {
                     {
                         const siegePool = i >= 12
                             ? ['tank', 'tank', 'mummy', 'swampThing', 'lavaGolem']
-                            : ['tank', 'tank', 'bomber', 'mummy'];
-                        config.enemies = this.fillEnemies(siegePool, Math.floor(baseCount * 0.65) + 4);
+                            : i < 10
+                                ? ['tank', 'tank', 'bomber']
+                                : ['tank', 'tank', 'bomber', 'mummy'];
+                        const siegeBonus = i < 10 ? 2 : 4;
+                        config.enemies = this.fillEnemies(siegePool, Math.floor(baseCount * 0.6) + siegeBonus);
                     }
                     break;
 
@@ -109,9 +120,11 @@ export class WaveSystem {
                     const bossTypes = ['berserkTitan', 'frostLord', 'infernoDrake', 'stormWraith'];
                     if (i >= 25) bossTypes.push('voidBehemoth');
                     config.enemies.push(bossTypes[Utils.seededInt(0, bossTypes.length - 1)]);
-                    
-                    // Add minions
-                    const minionCount = Math.floor(8 + i * 0.8 + Math.max(0, i - 20) * 0.1);
+
+                    // Minions: few at early boss waves, escalates after wave 10
+                    const minionCount = i < 10
+                        ? Math.floor(2 + i * 0.45)                          // W5->4, W9->6
+                        : Math.floor(4 + i * 0.9 + Math.max(0, i - 20) * 0.1); // W10→13, W20→22
                     const minionPool = i < 10
                         ? ['grunt', 'speeder', 'tank', 'bomber']
                         : ['tank', 'bomber', 'speeder', 'mummy', 'poisonFrog'];
@@ -120,14 +133,14 @@ export class WaveSystem {
 
                 default:  // mixed
                     const baseEnemies = ['grunt', 'grunt', 'speeder'];
-                    if (i >= 3) baseEnemies.push('tank');
-                    if (i >= 4) baseEnemies.push('bomber');
-                    if (i >= 7) baseEnemies.push('scorpion', 'poisonFrog');
+                    if (i >= 4) baseEnemies.push('tank');
+                    if (i >= 6) baseEnemies.push('bomber');
+                    if (i >= 9) baseEnemies.push('scorpion', 'poisonFrog');
                     config.enemies = this.fillEnemies(baseEnemies, Math.floor(baseCount));
 
                     // Rare biome mobs appear earlier, but remain a minority before wave 8.
                     const biomeMobs = ['scorpion', 'mummy', 'frostElemental', 'iceWolf', 'swampThing', 'poisonFrog', 'fireImp'];
-                    const rareChance = i < 8 ? 0.06 : 0.1;
+                    const rareChance = i < 6 ? 0 : i < 8 ? 0.04 : 0.1;
                     for (let j = 0; j < config.enemies.length; j++) {
                         if (Utils.seededRandom() < rareChance) {
                             config.enemies[j] = biomeMobs[Utils.seededInt(0, biomeMobs.length - 1)];
@@ -149,10 +162,10 @@ export class WaveSystem {
             1: 'mixed',
             2: 'swarm',
             3: 'mixed',
-            4: 'ranged',
-            6: 'siege',
+            4: 'mixed',
+            6: 'ranged',
             7: 'mixed',
-            8: 'elite',
+            8: 'siege',
             9: 'swarm'
         };
         if (earlyPattern[wave]) return earlyPattern[wave];
@@ -163,13 +176,14 @@ export class WaveSystem {
 
     getBaseEnemyCount(wave) {
         if (wave <= 5) {
-            return 7 + wave * 2;          // W1 9, W4 15 before type modifiers
+            // Gentler start: W1->4, W2->6, W3->8, W4->10, W5->12 (before type modifiers)
+            return 2 + wave * 2;
         }
         if (wave <= 15) {
-            return 17 + (wave - 5) * 3.1;
+            return 12 + (wave - 5) * 3.1;
         }
         if (wave <= 30) {
-            return 48 + (wave - 15) * 4.0;
+            return 46 + (wave - 15) * 4.0;
         }
         return 106 + (wave - 30) * 5.3;
     }
@@ -299,18 +313,18 @@ export class WaveSystem {
 
     getEnemyStatScaleFactor(wave = this.currentWave) {
         if (wave <= 6) {
-            return 1 + (wave - 1) * 0.07;
+            return 0.95 + (wave - 1) * 0.045;
         }
         if (wave <= 15) {
-            const baseScale = 1 + 5 * 0.07;
+            const baseScale = 0.95 + 5 * 0.045;
             return baseScale + (wave - 6) * 0.074;
         }
         if (wave <= 30) {
-            const baseScale = 1 + 5 * 0.07 + 9 * 0.074;
+            const baseScale = 0.95 + 5 * 0.045 + 9 * 0.074;
             return baseScale + (wave - 15) * 0.11;
         }
 
-        const baseScale = 1 + 5 * 0.07 + 9 * 0.074 + 15 * 0.11;
+        const baseScale = 0.95 + 5 * 0.045 + 9 * 0.074 + 15 * 0.11;
         return baseScale + (wave - 30) * 0.22;
     }
 
@@ -743,7 +757,13 @@ export class WaveSystem {
         }
 
         if (waveProgress) {
-            const enemies    = this.game.getEnemies();
+            const allEnemies = this.game.getEnemies();
+            // In versus mode, count only enemies targeting the local player's island
+            const localSlot = this.game.playerSlot ?? null;
+            const enemies = (this.game.gameMode === 'versus_ffa' && localSlot)
+                ? allEnemies.filter(e => !e.targetCrystalSlot || e.targetCrystalSlot === localSlot)
+                : allEnemies;
+
             const spawnLeft  = typeof this._netSpawnLeft === 'number'
                 ? this._netSpawnLeft          // client: use host-authoritative value
                 : this.spawnQueue.length + this.bonusSpawnQueue.length;     // host / solo: use local queue
@@ -762,6 +782,7 @@ export class WaveSystem {
      */
     receiveNetworkUpdate(msg) {
         const wasActive   = this.isWaveActive;
+        const prevWave    = this.currentWave;
         this.currentWave  = msg.wave  ?? this.currentWave;
         this.isWaveActive = msg.active ?? this.isWaveActive;
 
@@ -775,6 +796,16 @@ export class WaveSystem {
         if (!this.isWaveActive) {
             this._netSpawnLeft      = 0;
             this._netWaveStartTotal = 0;
+        }
+
+        // Notify clients when a new wave starts
+        if (!wasActive && this.isWaveActive) {
+            const waveType = msg.waveType ?? 'mixed';
+            const typeColors = { swarm: '#44ee44', elite: '#ff4444', ranged: '#4488ff', siege: '#ff8844', boss: '#ff0000', mixed: '#ffffff' };
+            const color = typeColors[waveType] || '#ffffff';
+            const typeLabels = { swarm: 'ESSAIM', elite: 'ÉLITE', ranged: 'DISTANCE', siege: 'SIÈGE', boss: '⚠ BOSS ⚠', mixed: 'MIXTE' };
+            const label = typeLabels[waveType] || waveType.toUpperCase();
+            this.game.showNotification(`Vague ${this.currentWave} — ${label}`, 'Préparez-vous !', color, 3);
         }
 
         this.updateWaveUI();

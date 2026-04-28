@@ -104,6 +104,45 @@ export class Projectile {
 
         // Check collisions with enemies (skip for visual-only remote projectiles)
         if (!this._visualOnly) {
+            // In versus mode, check hostile remote players BEFORE enemies so that
+            // turret shots aimed at a player are not consumed by an enemy standing
+            // in the path. (Enemy-targeted projectiles will still hit enemies first
+            // because the remote player won't be at the same position.)
+            if (this.game.gameMode === 'versus_ffa' && this.game.networkManager?.inRoom) {
+                const ownerSlot = this.game.resolvePlayerSlot(this.ownerId ?? this.game.networkManager?.playerId ?? null);
+                const remotePlayers = this.game.getHostileRemotePlayersFor(this.ownerId ?? this.game.networkManager?.playerId ?? null);
+
+                for (const remotePlayer of remotePlayers) {
+                    if (!remotePlayer || remotePlayer.destroyed) continue;
+                    if (!Utils.circleCollision(this.x, this.y, this.size, remotePlayer.x, remotePlayer.y, remotePlayer.collisionRadius || 16)) continue;
+
+                    let slowFactor = this.slowEffect || 0;
+                    let slowDuration = this.slowDuration || 0;
+                    if (this.specialEffect === 'ice' && slowFactor === 0) {
+                        slowFactor = this.bowTier >= 5 ? 0.6 : 0.5;
+                        slowDuration = this.bowTier >= 5 ? 3.0 : 2.5;
+                    }
+
+                    this.game.networkManager?.sendVersusPlayerHit?.(remotePlayer.playerId, {
+                        damage: this.damage,
+                        damageType: this.damageType,
+                        slowFactor,
+                        slowDuration,
+                        specialEffect: this.specialEffect || null,
+                        bowTier: this.bowTier || 1,
+                        targetSlot: this.game.resolvePlayerSlot(remotePlayer.playerId),
+                        targetId: remotePlayer.playerId,
+                        ownerSlot
+                    });
+
+                    if (!this.piercing) {
+                        this.destroyed = true;
+                        this.spawnHitEffect();
+                        return;
+                    }
+                }
+            }
+
             const enemies = this.game.getEnemies();
             for (const enemy of enemies) {
                 if (Utils.circleCollision(this.x, this.y, this.size, enemy.x, enemy.y, enemy.collisionRadius)) {
@@ -122,32 +161,6 @@ export class Projectile {
                         this.destroyed = true;
                         this.spawnHitEffect();
                         return;
-                    }
-                }
-
-                if (this.game.gameMode === 'versus_ffa' && this.game.networkManager?.inRoom) {
-                    const ownerSlot = this.game.resolvePlayerSlot(this.ownerId ?? this.game.networkManager?.playerId ?? null);
-                    const remotePlayers = this.game.getHostileRemotePlayersFor(this.ownerId ?? this.game.networkManager?.playerId ?? null);
-
-                    for (const remotePlayer of remotePlayers) {
-                        if (!remotePlayer || remotePlayer.destroyed) continue;
-                        if (!Utils.circleCollision(this.x, this.y, this.size, remotePlayer.x, remotePlayer.y, remotePlayer.collisionRadius || 16)) continue;
-
-                        this.game.networkManager?.sendVersusPlayerHit?.(remotePlayer.playerId, {
-                            damage: this.damage,
-                            damageType: this.damageType,
-                            slowFactor: this.slowEffect || 0,
-                            slowDuration: this.slowDuration || 0,
-                            targetSlot: this.game.resolvePlayerSlot(remotePlayer.playerId),
-                            targetId: remotePlayer.playerId,
-                            ownerSlot
-                        });
-
-                        if (!this.piercing) {
-                            this.destroyed = true;
-                            this.spawnHitEffect();
-                            return;
-                        }
                     }
                 }
             }
