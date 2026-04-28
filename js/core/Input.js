@@ -1,6 +1,6 @@
 /**
  * Input handling module
- * Manages keyboard and mouse input
+ * Manages keyboard, mouse and touch input
  */
 
 export class Input {
@@ -27,6 +27,15 @@ export class Input {
             wheel: 0
         };
 
+        // Unified virtual controls for touch/gamepad-like UI.
+        this.virtualActions = {};
+        this.virtualJustPressed = {};
+        this.virtualJustReleased = {};
+        this.virtualMovement = { x: 0, y: 0 };
+        this.touchMode = false;
+        this.pointerAimActive = false;
+        this.hasPointerAim = false;
+
         // Key bindings (AZERTY and QWERTY support)
         this.bindings = {
             moveUp: ['KeyW', 'KeyZ'],
@@ -44,11 +53,13 @@ export class Input {
             dash: ['ShiftLeft', 'ShiftRight'],
             aoe: ['KeyR'],
             heal: ['KeyF'],
+            attack: [],
             cancel: ['Space', 'Escape'],
             pause: ['Escape']
         };
 
         this._setupEventListeners();
+        this._setupMobileControls();
     }
 
     _setupEventListeners() {
@@ -77,8 +88,7 @@ export class Input {
         // Mouse events
         this.canvas.addEventListener('mousemove', (e) => {
             const rect = this.canvas.getBoundingClientRect();
-            this.mouse.x = e.clientX - rect.left;
-            this.mouse.y = e.clientY - rect.top;
+            this._setPointerScreenPosition(e.clientX, e.clientY, rect);
         });
 
         this.canvas.addEventListener('mousedown', (e) => {
@@ -116,11 +126,132 @@ export class Input {
             e.preventDefault();
         });
 
+        this.canvas.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'mouse') return;
+            this.touchMode = true;
+            this.pointerAimActive = true;
+            this.hasPointerAim = true;
+            this.canvas.setPointerCapture?.(e.pointerId);
+            this._setPointerScreenPosition(e.clientX, e.clientY);
+            this.setVirtualAction('attack', true);
+            e.preventDefault();
+        }, { passive: false });
+
+        this.canvas.addEventListener('pointermove', (e) => {
+            if (e.pointerType === 'mouse' || !this.pointerAimActive) return;
+            this.touchMode = true;
+            this._setPointerScreenPosition(e.clientX, e.clientY);
+            e.preventDefault();
+        }, { passive: false });
+
+        const endTouchPointer = (e) => {
+            if (e.pointerType === 'mouse') return;
+            this.pointerAimActive = false;
+            this.setVirtualAction('attack', false);
+            e.preventDefault();
+        };
+        this.canvas.addEventListener('pointerup', endTouchPointer, { passive: false });
+        this.canvas.addEventListener('pointercancel', endTouchPointer, { passive: false });
+
         // Handle window blur
         window.addEventListener('blur', () => {
             this.keys = {};
+            this.virtualActions = {};
+            this.virtualMovement = { x: 0, y: 0 };
+            this.pointerAimActive = false;
             this.mouse.leftDown = false;
             this.mouse.rightDown = false;
+        });
+    }
+
+    _setPointerScreenPosition(clientX, clientY, rect = this.canvas.getBoundingClientRect()) {
+        this.mouse.x = clientX - rect.left;
+        this.mouse.y = clientY - rect.top;
+        this.hasPointerAim = true;
+    }
+
+    _setupMobileControls() {
+        const controls = document.getElementById('mobile-controls');
+        if (!controls) return;
+
+        const movementPad = document.getElementById('mobile-joystick');
+        const knob = document.getElementById('mobile-joystick-knob');
+        let joystickPointerId = null;
+
+        const updateJoystick = (e) => {
+            if (!movementPad) return;
+            const rect = movementPad.getBoundingClientRect();
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            const maxRadius = rect.width * 0.38;
+            let dx = e.clientX - cx;
+            let dy = e.clientY - cy;
+            const dist = Math.hypot(dx, dy);
+            if (dist > maxRadius && dist > 0) {
+                dx = dx / dist * maxRadius;
+                dy = dy / dist * maxRadius;
+            }
+
+            const strength = maxRadius > 0 ? Math.min(1, Math.hypot(dx, dy) / maxRadius) : 0;
+            this.virtualMovement.x = maxRadius ? (dx / maxRadius) * strength : 0;
+            this.virtualMovement.y = maxRadius ? (dy / maxRadius) * strength : 0;
+
+            if (knob) {
+                knob.style.transform = `translate(${dx}px, ${dy}px)`;
+            }
+        };
+
+        const resetJoystick = () => {
+            joystickPointerId = null;
+            this.virtualMovement.x = 0;
+            this.virtualMovement.y = 0;
+            if (knob) knob.style.transform = 'translate(0, 0)';
+        };
+
+        if (movementPad) {
+            movementPad.addEventListener('pointerdown', (e) => {
+                this.touchMode = true;
+                joystickPointerId = e.pointerId;
+                movementPad.setPointerCapture?.(e.pointerId);
+                updateJoystick(e);
+                e.preventDefault();
+            }, { passive: false });
+            movementPad.addEventListener('pointermove', (e) => {
+                if (e.pointerId !== joystickPointerId) return;
+                updateJoystick(e);
+                e.preventDefault();
+            }, { passive: false });
+            movementPad.addEventListener('pointerup', resetJoystick);
+            movementPad.addEventListener('pointercancel', resetJoystick);
+        }
+
+        controls.querySelectorAll('[data-mobile-action]').forEach((button) => {
+            const action = button.dataset.mobileAction;
+            const mode = button.dataset.mobileMode || 'hold';
+            const press = (e) => {
+                this.touchMode = true;
+                if (mode === 'tap') {
+                    this.pulseAction(action);
+                } else {
+                    this.setVirtualAction(action, true);
+                    button.classList.add('pressed');
+                }
+                e.preventDefault();
+                e.stopPropagation();
+            };
+            const release = (e) => {
+                if (mode !== 'tap') {
+                    this.setVirtualAction(action, false);
+                    button.classList.remove('pressed');
+                }
+                e.preventDefault();
+                e.stopPropagation();
+            };
+
+            button.addEventListener('pointerdown', press, { passive: false });
+            button.addEventListener('pointerup', release, { passive: false });
+            button.addEventListener('pointercancel', release, { passive: false });
+            button.addEventListener('lostpointercapture', release, { passive: false });
         });
     }
 
@@ -162,8 +293,8 @@ export class Input {
      */
     isActionDown(action) {
         const codes = this.bindings[action];
-        if (!codes) return false;
-        return codes.some(code => this.keys[code]);
+        const keyboardDown = codes ? codes.some(code => this.keys[code]) : false;
+        return keyboardDown || !!this.virtualActions[action];
     }
 
     /**
@@ -171,8 +302,8 @@ export class Input {
      */
     isActionJustPressed(action) {
         const codes = this.bindings[action];
-        if (!codes) return false;
-        return codes.some(code => this.keysJustPressed[code]);
+        const keyboardPressed = codes ? codes.some(code => this.keysJustPressed[code]) : false;
+        return keyboardPressed || !!this.virtualJustPressed[action];
     }
 
     /**
@@ -182,9 +313,23 @@ export class Input {
     isActionPressed(action) {
         // Handle attack action with left mouse button
         if (action === 'attack') {
-            return this.mouse.leftDown;
+            return this.mouse.leftDown || !!this.virtualActions.attack;
         }
         return this.isActionDown(action);
+    }
+
+    setVirtualAction(action, down) {
+        if (down && !this.virtualActions[action]) {
+            this.virtualJustPressed[action] = true;
+        } else if (!down && this.virtualActions[action]) {
+            this.virtualJustReleased[action] = true;
+        }
+        this.virtualActions[action] = down;
+    }
+
+    pulseAction(action) {
+        this.virtualJustPressed[action] = true;
+        this.virtualActions[action] = false;
     }
 
     /**
@@ -209,6 +354,9 @@ export class Input {
         if (this.isActionDown('moveLeft')) dx -= 1;
         if (this.isActionDown('moveRight')) dx += 1;
 
+        dx += this.virtualMovement.x;
+        dy += this.virtualMovement.y;
+
         // Normalize diagonal movement
         if (dx !== 0 && dy !== 0) {
             const length = Math.sqrt(dx * dx + dy * dy);
@@ -225,6 +373,8 @@ export class Input {
     endFrame() {
         this.keysJustPressed = {};
         this.keysJustReleased = {};
+        this.virtualJustPressed = {};
+        this.virtualJustReleased = {};
         this.mouse.leftJustPressed = false;
         this.mouse.rightJustPressed = false;
         this.mouse.leftJustReleased = false;

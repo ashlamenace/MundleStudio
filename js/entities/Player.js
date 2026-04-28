@@ -348,6 +348,7 @@ export class Player extends Entity {
         // Face mouse direction
         const mouse = input.getMousePosition();
         this.facingAngle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
+        this.applyTouchAimAssist(input);
 
         // Attack/Use Tool
         if (this.attackCooldown > 0) {
@@ -411,6 +412,54 @@ export class Player extends Entity {
 
         // Sprite animation update
         this._updateSpriteAnim(deltaTime);
+    }
+
+    applyTouchAimAssist(input) {
+        if (!input.touchMode || input.pointerAimActive || !input.isActionPressed('attack')) return;
+
+        const tool = this.tools[this.selectedSlot];
+        if (!tool || tool.type === 'build') return;
+
+        const maxRange = tool.type === 'ranged'
+            ? Math.max(tool.range || 300, 360)
+            : Math.max((tool.range || this.attackRange) + 55, 120);
+        let best = null;
+        let bestScore = Infinity;
+
+        for (const entity of this.game.entities) {
+            if (!entity || entity.destroyed || entity === this) continue;
+            const targetable =
+                entity.type === 'enemy' ||
+                (tool.type === 'tool' && entity.type === 'resource');
+            if (!targetable) continue;
+
+            const dist = Utils.distance(this.x, this.y, entity.x, entity.y);
+            if (dist > maxRange + (entity.collisionRadius || 0)) continue;
+            const priority = entity.type === 'enemy' ? 0 : 80;
+            const score = dist + priority;
+            if (score < bestScore) {
+                best = entity;
+                bestScore = score;
+            }
+        }
+
+        if (!best && tool.type === 'melee' && this.game.buildingSystem) {
+            for (const building of this.game.buildingSystem.buildings) {
+                if (!building || building.destroyed || !building.solid) continue;
+                const dist = Utils.distance(this.x, this.y, building.x, building.y);
+                if (dist > maxRange + (building.collisionRadius || 0)) continue;
+                if (dist < bestScore) {
+                    best = building;
+                    bestScore = dist;
+                }
+            }
+        }
+
+        if (best) {
+            this.facingAngle = Math.atan2(best.y - this.y, best.x - this.x);
+        } else if (Math.abs(this.vx) > 1 || Math.abs(this.vy) > 1) {
+            this.facingAngle = Math.atan2(this.vy, this.vx);
+        }
     }
 
     _updateSpriteAnim(dt) {
