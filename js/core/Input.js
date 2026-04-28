@@ -132,7 +132,7 @@ export class Input {
             this.touchMode = true;
             this.pointerAimActive = true;
             this.hasPointerAim = true;
-            this.canvas.setPointerCapture?.(e.pointerId);
+            this._tryPointerCapture(this.canvas, e.pointerId);
             this._setPointerScreenPosition(e.clientX, e.clientY);
             this.setVirtualAction('attack', true);
             e.preventDefault();
@@ -214,7 +214,7 @@ export class Input {
             movementPad.addEventListener('pointerdown', (e) => {
                 this.touchMode = true;
                 joystickPointerId = e.pointerId;
-                movementPad.setPointerCapture?.(e.pointerId);
+                this._tryPointerCapture(movementPad, e.pointerId);
                 updateJoystick(e);
                 e.preventDefault();
             }, { passive: false });
@@ -232,6 +232,7 @@ export class Input {
             const mode = button.dataset.mobileMode || 'hold';
             const press = (e) => {
                 this.touchMode = true;
+                button._lastMobilePointerPressAt = performance.now();
                 if (mode === 'tap') {
                     this.pulseAction(action);
                 } else {
@@ -254,7 +255,28 @@ export class Input {
             button.addEventListener('pointerup', release, { passive: false });
             button.addEventListener('pointercancel', release, { passive: false });
             button.addEventListener('lostpointercapture', release, { passive: false });
+            if (mode === 'tap') {
+                button.addEventListener('click', (e) => {
+                    if (performance.now() - (button._lastMobilePointerPressAt || 0) < 350) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                    }
+                    this.touchMode = true;
+                    this.pulseAction(action);
+                    e.preventDefault();
+                    e.stopPropagation();
+                });
+            }
         });
+    }
+
+    _tryPointerCapture(element, pointerId) {
+        try {
+            element?.setPointerCapture?.(pointerId);
+        } catch {
+            // Synthetic tests and a few embedded browsers can report no active pointer.
+        }
     }
 
     _isGameKey(code) {

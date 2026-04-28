@@ -750,7 +750,7 @@ body {
     }
 
     #action-bar {
-        bottom: max(8px, env(safe-area-inset-bottom));
+        bottom: calc(max(8px, env(safe-area-inset-bottom)) + 190px);
         gap: 5px;
         padding: 5px;
         z-index: 125;
@@ -779,7 +779,11 @@ body {
     }
 
     #health-section {
-        bottom: 68px;
+        top: calc(max(8px, env(safe-area-inset-top)) + 42px);
+        bottom: auto;
+        left: 8px;
+        transform: none;
+        flex-direction: column;
         gap: 5px;
         padding: 5px;
     }
@@ -811,7 +815,8 @@ body {
         width: 96px;
         height: 96px;
         right: 8px;
-        bottom: 178px;
+        top: calc(max(8px, env(safe-area-inset-top)) + 82px);
+        bottom: auto;
     }
 
     #build-menu,
@@ -1980,5 +1985,40 @@ body {
 
     .versus-slot-hp {
         min-width: 40px;
+    }
+}
+
+@media (hover: none), (pointer: coarse), (max-width: 820px) {
+    #wave-section {
+        top: max(8px, env(safe-area-inset-top));
+        left: 8px;
+        transform: none;
+        max-width: 150px;
+    }
+
+    #health-section {
+        top: calc(max(8px, env(safe-area-inset-top)) + 78px);
+        bottom: auto;
+        left: 8px;
+        width: 150px;
+        height: auto;
+        transform: none;
+        align-items: stretch;
+    }
+
+    #resources-section {
+        top: max(8px, env(safe-area-inset-top));
+        right: 8px;
+        max-width: 220px;
+    }
+
+    #minimap-container {
+        top: calc(max(8px, env(safe-area-inset-top)) + 108px);
+        right: 8px;
+        bottom: auto;
+    }
+
+    #action-bar {
+        bottom: calc(max(8px, env(safe-area-inset-bottom)) + 190px);
     }
 }

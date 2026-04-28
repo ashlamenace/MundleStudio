@@ -60,7 +60,11 @@ export class Minimap {
         const onDown = (e) => {
             if (e.button !== undefined && e.button !== 0) return;
             this._panning = true;
-            this.canvas.setPointerCapture?.(e.pointerId);
+            try {
+                this.canvas.setPointerCapture?.(e.pointerId);
+            } catch {
+                // Synthetic tests can dispatch pointer events without an active pointer.
+            }
             const { mx, my } = getMinimapXY(e);
             const w = this._minimapToWorld(mx, my);
             this.panWorldX = w.x;
